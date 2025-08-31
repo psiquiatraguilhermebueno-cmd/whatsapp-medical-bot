@@ -13,7 +13,7 @@ class WhatsAppService:
         self.access_token = os.getenv('WHATSAPP_ACCESS_TOKEN', '')
         self.phone_number_id = os.getenv('WHATSAPP_PHONE_NUMBER_ID', '')
         self.webhook_verify_token = os.getenv('WHATSAPP_WEBHOOK_VERIFY_TOKEN', 'medical_bot_webhook_token')
-        self.base_url = f"https://graph.facebook.com/v18.0/{self.phone_number_id}"
+        self.base_url = f"https://graph.facebook.com/v23.0/{self.phone_number_id}"
         
         # Headers para requisições
         self.headers = {
