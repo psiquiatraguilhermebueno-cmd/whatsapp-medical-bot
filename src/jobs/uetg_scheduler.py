@@ -319,11 +319,14 @@ def process_button_click(button_id, patient_phone, patient_name):
         # Mapear IDs dos botões para horários
         slot_map = {
             'slot_0730': '07:30',
-            'slot_1200': '12:15', 
+            'slot_1215': '12:15', 
             'slot_1900': '19:00'
         }
         
         selected_slot = slot_map.get(button_id, button_id)
+        selected_slot = slot_map.get(button_id, button_id)
+print(f"[uETG] button_id recebido: {button_id}")
+print(f"[uETG] slot selecionado (mapeado): {selected_slot}")
         
         # Salvar confirmação
         if save_confirmation(today, selected_slot, patient_name):
