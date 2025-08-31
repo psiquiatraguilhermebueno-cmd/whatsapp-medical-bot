@@ -1,4 +1,4 @@
-import logging
+import logging 
 import os
 from typing import Dict, Any
 from src.services.whatsapp_service import WhatsAppService
@@ -104,15 +104,27 @@ class WhatsAppMessageHandler:
         """Processar mensagem interativa (botões/listas)"""
         try:
             # Extrair ID da resposta
-            response_id = None
-            if interactive_data.get('type') == 'button_reply':
-                response_id = interactive_data.get('button_reply', {}).get('id')
-            elif interactive_data.get('type') == 'list_reply':
-                response_id = interactive_data.get('list_reply', {}).get('id')
-            
-            if not response_id:
-                return {"status": "error", "message": "No response ID found"}
-            
+            # Extrair ID ou título do botão (alguns templates mandam só o title)
+btn = interactive_data.get('button_reply') or interactive_data.get('list_reply') or {}
+response_id = btn.get('id') or btn.get('title')  # usa id; se não tiver, usa title (ex.: "12:15")
+
+if not response_id:
+    return {"status": "error", "message": "No response ID or title"}
+
+# --- uETG: aceitar IDs (slot_XXXX) ou os títulos de horário ("07:30", "12:15", "19:00")
+slot_ids = {"slot_0730", "slot_1215", "slot_1900"}
+slot_titles = {"07:30": "slot_0730", "12:15": "slot_1215", "19:00": "slot_1900"}
+
+normalized = None
+if response_id in slot_ids:
+    normalized = response_id
+elif response_id in slot_titles:
+    normalized = slot_titles[response_id]
+
+if normalized:
+    patient = self._get_or_create_patient(user_info)
+    if patient:
+        return self._handle_uetg_slot_callback(phone_number, normalized, patient)
             # Verificar se é ação administrativa
             if self._is_admin(phone_number):
                 return self._handle_admin_callback(phone_number, response_id, user_info)
