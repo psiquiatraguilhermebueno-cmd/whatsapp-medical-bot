@@ -17,6 +17,8 @@ from src.routes.medication import medication_bp
 from src.routes.mood import mood_bp
 from src.routes.scheduler import scheduler_bp
 from src.routes.iclinic import iclinic_bp
+from src.routes.admin_tasks import admin_bp
+from src.jobs.uetg_scheduler import init_scheduler
 
 app = Flask(__name__, static_folder=os.path.join(os.path.dirname(__file__), 'static'))
 app.config['SECRET_KEY'] = 'asdf#FGSgvasgf$5$WGT'
@@ -36,6 +38,7 @@ app.register_blueprint(medication_bp, url_prefix='/api')
 app.register_blueprint(mood_bp, url_prefix='/api')
 app.register_blueprint(scheduler_bp, url_prefix='/api/scheduler')
 app.register_blueprint(iclinic_bp, url_prefix='/api/iclinic')
+app.register_blueprint(admin_bp, url_prefix='/api/admin')
 
 # uncomment if you need to use database
 app.config['SQLALCHEMY_DATABASE_URI'] = f"sqlite:///{os.path.join(os.path.dirname(__file__), 'database', 'app.db')}"
@@ -60,6 +63,13 @@ with app.app_context():
     # # Inicializar exercícios de respiração
     # from src.utils.breathing_exercises_initializer import initialize_breathing_exercises
     # initialize_breathing_exercises()
+
+# Inicializar scheduler u-ETG (se não estiver desabilitado)
+if os.getenv('DISABLE_SCHEDULER') != '1':
+    try:
+        init_scheduler()
+    except Exception as e:
+        print(f"⚠️ Erro ao inicializar scheduler u-ETG: {e}")
 
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
