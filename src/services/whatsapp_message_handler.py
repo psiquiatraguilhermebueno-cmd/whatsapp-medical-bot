@@ -100,76 +100,79 @@ class WhatsAppMessageHandler:
             self.logger.error(f"Erro ao processar mensagem de texto: {e}")
             return {"status": "error", "message": str(e)}
     
-    def _handle_interactive_message(self, phone_number: str, interactive_data: Dict, user_info: Dict) -> Dict:
-        """Processar mensagem interativa (botões/listas)"""
-        try:
-            # Extrair ID da resposta
-            # Extrair ID ou título do botão (alguns templates mandam só o title)
-btn = interactive_data.get('button_reply') or interactive_data.get('list_reply') or {}
-response_id = btn.get('id') or btn.get('title')  # usa id; se não tiver, usa title (ex.: "12:15")
+   def _handle_interactive_message(self, phone_number: str, interactive_data: Dict, user_info: Dict) -> Dict:
+    """Processar mensagem interativa (botões/listas)"""
+    try:
+        # 1) Extrair ID ou título da resposta
+        response_id = None
+        if interactive_data.get('type') == 'button_reply':
+            btn = interactive_data.get('button_reply') or {}
+            response_id = btn.get('id') or btn.get('title')
+        elif interactive_data.get('type') == 'list_reply':
+            lr = interactive_data.get('list_reply') or {}
+            response_id = lr.get('id') or lr.get('title')
 
-if not response_id:
-    return {"status": "error", "message": "No response ID or title"}
+        if not response_id:
+            return {"status": "error", "message": "No response ID or title"}
 
-# --- uETG: aceitar IDs (slot_XXXX) ou os títulos de horário ("07:30", "12:15", "19:00")
-slot_ids = {"slot_0730", "slot_1215", "slot_1900"}
-slot_titles = {"07:30": "slot_0730", "12:15": "slot_1215", "19:00": "slot_1900"}
+        # 2) u-ETG: aceitar IDs (slot_XXXX) ou títulos ("07:30", "12:15", "19:00")
+        slot_ids = {"slot_0730", "slot_1215", "slot_1900"}
+        slot_titles = {"07:30": "slot_0730", "12:15": "slot_1215", "19:00": "slot_1900"}
 
-normalized = None
-if response_id in slot_ids:
-    normalized = response_id
-elif response_id in slot_titles:
-    normalized = slot_titles[response_id]
+        normalized = None
+        if response_id in slot_ids:
+            normalized = response_id
+        elif response_id in slot_titles:
+            normalized = slot_titles[response_id]
 
-if normalized:
-    patient = self._get_or_create_patient(user_info)
-    if patient:
-        return self._handle_uetg_slot_callback(phone_number, normalized, patient)
-            # Verificar se é ação administrativa
-            if self._is_admin(phone_number):
-                return self._handle_admin_callback(phone_number, response_id, user_info)
-            
-            # Verificar se é resposta de questionário
-            if response_id.startswith('questionnaire_') or response_id.startswith('start_questionnaire_'):
-                patient = self._get_or_create_patient(user_info)
-                if patient:
-                    return self._handle_questionnaire_callback(phone_number, response_id, patient)
-            
-            # Verificar se é confirmação de medicação
-            if response_id.startswith('medication_'):
-                patient = self._get_or_create_patient(user_info)
-                if patient:
-                    return self._handle_medication_callback(phone_number, response_id, patient)
-            
-            # Verificar se é registro de humor
-            if response_id.startswith('mood_') or response_id.startswith('start_mood_'):
-                patient = self._get_or_create_patient(user_info)
-                if patient:
-                    return self._handle_mood_callback(phone_number, response_id, patient)
-            
-            # Verificar se é exercício de respiração
-            if response_id.startswith('breathing_') or response_id.startswith('start_breathing_'):
-                patient = self._get_or_create_patient(user_info)
-                if patient:
-                    return self._handle_breathing_callback(phone_number, response_id, patient)
-            
-            # Verificar se é ação de lembrete (snooze, skip)
-            if response_id.startswith('snooze_') or response_id.startswith('skip_'):
-                patient = self._get_or_create_patient(user_info)
-                if patient:
-                    return self._handle_reminder_action(phone_number, response_id, patient)
-            
-            # Verificar se é confirmação de horário u-ETG
-            if response_id.startswith('slot_'):
-                patient = self._get_or_create_patient(user_info)
-                if patient:
-                    return self._handle_uetg_slot_callback(phone_number, response_id, patient)
-            
-            return {"status": "processed", "action": "interactive_handled"}
-            
-        except Exception as e:
-            self.logger.error(f"Erro ao processar mensagem interativa: {e}")
-            return {"status": "error", "message": str(e)}
+        # 3) Se for confirmação u-ETG, processa e encerra
+        if normalized:
+            from src.jobs.uetg_scheduler import process_button_click
+            patient = self._get_or_create_patient(user_info)
+            patient_name = (patient.name if patient else user_info.get("name") or "Paciente")
+            ok = process_button_click(normalized, phone_number, patient_name)
+            if ok:
+                return {"status": "processed", "action": "uetg_slot_confirmed"}
+            else:
+                self.whatsapp_service.send_text_message(
+                    phone_number, "❌ Erro ao confirmar horário. Tente novamente."
+                )
+                return {"status": "error", "action": "uetg_slot_error"}
+
+        # 4) Não é u-ETG: fluxo normal
+        if self._is_admin(phone_number):
+            return self._handle_admin_callback(phone_number, response_id, user_info)
+
+        if response_id.startswith('start_questionnaire_') or response_id.startswith('questionnaire_'):
+            patient = self._get_or_create_patient(user_info)
+            if patient:
+                return self._handle_questionnaire_callback(phone_number, response_id, patient)
+
+        if response_id.startswith('medication_'):
+            patient = self._get_or_create_patient(user_info)
+            if patient:
+                return self._handle_medication_callback(phone_number, response_id, patient)
+
+        if response_id.startswith('mood_') or response_id.startswith('start_mood_'):
+            patient = self._get_or_create_patient(user_info)
+            if patient:
+                return self._handle_mood_callback(phone_number, response_id, patient)
+
+        if response_id.startswith('breathing_') or response_id.startswith('start_breathing_'):
+            patient = self._get_or_create_patient(user_info)
+            if patient:
+                return self._handle_breathing_callback(phone_number, response_id, patient)
+
+        if response_id.startswith('snooze_') or response_id.startswith('skip_'):
+            patient = self._get_or_create_patient(user_info)
+            if patient:
+                return self._handle_reminder_action(phone_number, response_id, patient)
+
+        return {"status": "processed", "action": "interactive_handled"}
+
+    except Exception as e:
+        self.logger.error(f"Erro ao processar mensagem interativa: {e}")
+        return {"status": "error", "message": str(e)}
     
     def _handle_admin_command(self, phone_number: str, command: str, user_info: Dict) -> Dict:
         """Processar comando administrativo"""
