@@ -215,44 +215,61 @@ class WhatsAppService:
             }
     
     def parse_webhook_message(self, webhook_data: Dict) -> Optional[Dict]:
-        """Processar mensagem recebida via webhook"""
-        try:
-            if 'entry' not in webhook_data:
-                return None
-            
-            entry = webhook_data['entry'][0]
-            if 'changes' not in entry:
-                return None
-            
-            change = entry['changes'][0]
-            if change.get('field') != 'messages':
-                return None
-            
-            value = change.get('value', {})
-            if 'messages' not in value:
-                return None
-            
-            message = value['messages'][0]
-            contact = value['contacts'][0] if 'contacts' in value else {}
-            
-            return {
-                'message_id': message.get('id'),
-                'from': message.get('from'),
-                'timestamp': message.get('timestamp'),
-                'type': message.get('type'),
-                'text': message.get('text', {}).get('body') if message.get('type') == 'text' else None,
-                'interactive': message.get('interactive') if message.get('type') == 'interactive' else None,
-                'audio': message.get('audio') if message.get('type') == 'audio' else None,
-                'document': message.get('document') if message.get('type') == 'document' else None,
-                'image': message.get('image') if message.get('type') == 'image' else None,
-                'video': message.get('video') if message.get('type') == 'video' else None,
-                'contact_name': contact.get('profile', {}).get('name', 'Usuário'),
-                'raw_data': webhook_data
-            }
-        except Exception as e:
-            print(f"Erro ao processar webhook: {e}")
+    """Processar mensagem recebida via webhook (robusto para campos None)"""
+    try:
+        entry = (webhook_data.get('entry') or [None])[0]
+        if not entry:
             return None
-    
+
+        change = (entry.get('changes') or [None])[0]
+        if not change or change.get('field') != 'messages':
+            return None
+
+        value = change.get('value') or {}
+        messages = value.get('messages') or []
+        contacts = value.get('contacts') or []
+        if not messages:
+            return None
+
+        msg = messages[0]
+
+        # helper: só faz strip se for string
+        def s(v):
+            return v.strip() if isinstance(v, str) else ''
+
+        # nome do contato (pode não existir)
+        contact_profile = (contacts[0].get('profile') if contacts else {}) or {}
+        contact_name = s(contact_profile.get('name'))
+
+        # pode ser None quando for botão/lista
+        text_body = (msg.get('text') or {}).get('body')
+        interactive = msg.get('interactive')  # dict ou None
+
+        # tipo robusto
+        if interactive:
+            msg_type = 'interactive'
+        elif isinstance(text_body, str) and text_body:
+            msg_type = 'text'
+        else:
+            msg_type = msg.get('type')
+
+        return {
+            'message_id': msg.get('id'),
+            'from': msg.get('from'),
+            'timestamp': msg.get('timestamp'),
+            'type': msg_type,
+            'text': s(text_body),
+            'interactive': interactive,
+            'audio': msg.get('audio') if msg.get('type') == 'audio' else None,
+            'document': msg.get('document') if msg.get('type') == 'document' else None,
+            'image': msg.get('image') if msg.get('type') == 'image' else None,
+            'video': msg.get('video') if msg.get('type') == 'video' else None,
+            'contact_name': contact_name,
+            'raw_data': webhook_data
+        }
+    except Exception as e:
+        print(f"Erro ao processar webhook: {e}")
+        return None
     def verify_webhook(self, mode: str, token: str, challenge: str) -> Optional[str]:
         """Verificar webhook do WhatsApp"""
         if mode == "subscribe" and token == self.webhook_verify_token:
