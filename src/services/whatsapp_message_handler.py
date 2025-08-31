@@ -22,7 +22,7 @@ class WhatsAppMessageHandler:
         self.logger = logging.getLogger(__name__)
         
         # Número do administrador (configurado via variável de ambiente)
-        self.admin_phone = os.getenv('ADMIN_PHONE_NUMBER')
+        self.admin_phone = (os.getenv('ADMIN_PHONE_NUMBER') or '').strip()
     
     def handle_webhook(self, webhook_data: Dict) -> Dict:
         """
@@ -280,9 +280,10 @@ Aguarde os lembretes automáticos ou digite *menu* para ver as opções disponí
         return patient
     
     def _is_admin(self, phone_number: str) -> bool:
-        """Verificar se o número é de um administrador"""
-        if not self.admin_phone:
-            return False
+    raw = self.admin_phone or ''
+    admin_phones = [p.strip() for p in raw.split(',') if isinstance(p, str) and p.strip()]
+    return phone_number in admin_phones
+            
         
         # Suportar múltiplos admins separados por vírgula
         admin_phones = [phone.strip() for phone in self.admin_phone.split(',')]
@@ -355,20 +356,15 @@ Vamos começar? Encontre um local confortável e siga as instruções."""
             return {"status": "error", "message": str(e)}
     
     def notify_admin(self, message: str) -> Dict:
-        """Enviar notificação para o administrador"""
-        if not self.admin_phone:
-            self.logger.warning("Admin phone não configurado")
-            return {"status": "error", "message": "Admin phone not configured"}
-        
-        try:
-            # Suportar múltiplos admins separados por vírgula
-            admin_phones = [phone.strip() for phone in self.admin_phone.split(',')]
-            for admin_phone in admin_phones:
-                self.whatsapp_service.send_text_message(admin_phone, message)
-            
-            return {"status": "sent", "action": "admin_notified"}
-            
-        except Exception as e:
-            self.logger.error(f"Erro ao notificar admin: {e}")
-            return {"status": "error", "message": str(e)}
-
+    raw = self.admin_phone or ''
+    admin_phones = [p.strip() for p in raw.split(',') if isinstance(p, str) and p.strip()]
+    if not admin_phones:
+        self.logger.warning("Admin phone não configurado")
+        return {"status": "error", "message": "Admin phone not configured"}
+    try:
+        for admin_phone in admin_phones:
+            self.whatsapp_service.send_text_message(admin_phone, message)
+        return {"status": "sent", "action": "admin_notified"}
+    except Exception as e:
+        self.logger.error(f"Erro ao notificar admin: {e}")
+        return {"status": "error", "message": str(e)}
