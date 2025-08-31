@@ -11,6 +11,9 @@ from datetime import datetime, timedelta
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 import pytz
+# --- logging & timezone ---
+import logging
+log = logging.getLogger("uetg")  # aparece nos logs do Railway
 
 # Configurações
 TIMEZONE = pytz.timezone('America/Sao_Paulo')
@@ -315,36 +318,43 @@ def process_button_click(button_id, patient_phone, patient_name):
     """Processa clique nos botões de horário"""
     try:
         today = datetime.now(TIMEZONE).date().isoformat()
-        
-        # Mapear IDs dos botões para horários
+
+        # Aceita ID antigo e novo do botão do meio
         slot_map = {
             'slot_0730': '07:30',
-            'slot_1215': '12:15', 
-            'slot_1900': '19:00'
+            'slot_1200': '12:15',  # caso o template antigo ainda mande 1200
+            'slot_1215': '12:15',  # novo ID
+            'slot_1900': '19:00',
         }
-        
+
         selected_slot = slot_map.get(button_id, button_id)
-        selected_slot = slot_map.get(button_id, button_id)
-print(f"[uETG] button_id recebido: {button_id}")
-print(f"[uETG] slot selecionado (mapeado): {selected_slot}")
-        
-        # Salvar confirmação
+        log.info("[uETG] button_id=%s selected_slot=%s", button_id, selected_slot)
+
+        # Salva confirmação
         if save_confirmation(today, selected_slot, patient_name):
-            # Confirmar para o paciente
-            patient_message = f"✅ Horário confirmado: {selected_slot} para hoje ({datetime.now(TIMEZONE).strftime('%d/%m/%Y')})\n\nObrigado! Aguardamos você no horário marcado."
+            # confirma ao paciente
+            patient_message = (
+                f"✅ Horário confirmado: {selected_slot} para hoje "
+                f"({datetime.now(TIMEZONE).strftime('%d/%m/%Y')})\n\n"
+                "Obrigado! Aguardamos você no horário marcado."
+            )
             send_whatsapp_message(patient_phone, patient_message)
-            
-            # Notificar admin
-            admin_message = f"✅ *Confirmação u-ETG*\n\n{patient_name} confirmou {selected_slot} para {datetime.now(TIMEZONE).strftime('%d/%m/%Y')}"
+
+            # notifica admin
+            admin_message = (
+                "✅ *Confirmação u-ETG*\n\n"
+                f"{patient_name} confirmou {selected_slot} para "
+                f"{datetime.now(TIMEZONE).strftime('%d/%m/%Y')}"
+            )
             send_whatsapp_message(ADMIN_PHONE_NUMBER, admin_message)
-            
-            print(f"✅ Confirmação processada: {patient_name} - {selected_slot}")
+
+            log.info("✅ Confirmação processada: %s - %s", patient_name, selected_slot)
             return True
         else:
-            print(f"❌ Erro ao salvar confirmação")
+            log.error("❌ Erro ao salvar confirmação")
             return False
-            
-    except Exception as e:
-        print(f"❌ Erro ao processar clique: {e}")
-        return False
 
+    except Exception:
+        log.exception("❌ Erro ao processar clique")
+        return False
+         
