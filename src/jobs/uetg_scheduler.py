@@ -319,8 +319,7 @@ def process_button_click(button_id, patient_phone, patient_name):
         # Mapear IDs dos botões para horários
         slot_map = {
             'slot_0730': '07:30',
-            'slot_1200': '12:00', 
-            'slot_1640': '16:40',
+            'slot_1200': '12:15', 
             'slot_1900': '19:00'
         }
         
