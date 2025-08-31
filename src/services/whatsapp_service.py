@@ -214,68 +214,54 @@ class WhatsAppService:
                 'status_code': 500
             }
     
-    def parse_webhook_message(self, webhook_data: Dict) -> Optional[Dict]:
-    """Processar mensagem recebida via webhook (robusto para campos None)"""
-    try:
-        entry = (webhook_data.get('entry') or [None])[0]
-        if not entry:
+   def parse_webhook_message(self, webhook_data: Dict) -> Optional[Dict]:
+        """Processar mensagem recebida via webhook (robusto para campos None)"""
+        try:
+            if not webhook_data or 'entry' not in webhook_data:
+                return None
+
+            entry = webhook_data.get('entry') or []
+            if not entry:
+                return None
+            entry0 = entry[0] or {}
+
+            changes = entry0.get('changes') or []
+            if not changes:
+                return None
+            change0 = changes[0] or {}
+
+            if change0.get('field') != 'messages':
+                return None
+
+            value = change0.get('value') or {}
+            messages = value.get('messages') or []
+            contacts = value.get('contacts') or []
+
+            if not messages:
+                return None
+
+            message = messages[0] or {}
+            contact = contacts[0] if contacts else {}
+            msg_type = message.get('type')
+
+            return {
+                'message_id': message.get('id'),
+                'from': message.get('from'),
+                'timestamp': message.get('timestamp'),
+                'type': msg_type,
+                'text': (message.get('text') or {}).get('body') if msg_type == 'text' else None,
+                'interactive': message.get('interactive') if msg_type == 'interactive' else None,
+                'audio': message.get('audio') if msg_type == 'audio' else None,
+                'document': message.get('document') if msg_type == 'document' else None,
+                'image': message.get('image') if msg_type == 'image' else None,
+                'video': message.get('video') if msg_type == 'video' else None,
+                'contact_name': ((contact.get('profile') or {}).get('name')) or 'Usuário',
+                'raw_data': webhook_data
+            }
+        except Exception as e:
+            print(f"Erro ao processar webhook: {e}")
             return None
-
-        change = (entry.get('changes') or [None])[0]
-        if not change or change.get('field') != 'messages':
-            return None
-
-        value = change.get('value') or {}
-        messages = value.get('messages') or []
-        contacts = value.get('contacts') or []
-        if not messages:
-            return None
-
-        msg = messages[0]
-
-        # helper: só faz strip se for string
-        def s(v):
-            return v.strip() if isinstance(v, str) else ''
-
-        # nome do contato (pode não existir)
-        contact_profile = (contacts[0].get('profile') if contacts else {}) or {}
-        contact_name = s(contact_profile.get('name'))
-
-        # pode ser None quando for botão/lista
-        text_body = (msg.get('text') or {}).get('body')
-        interactive = msg.get('interactive')  # dict ou None
-
-        # tipo robusto
-        if interactive:
-            msg_type = 'interactive'
-        elif isinstance(text_body, str) and text_body:
-            msg_type = 'text'
-        else:
-            msg_type = msg.get('type')
-
-        return {
-            'message_id': msg.get('id'),
-            'from': msg.get('from'),
-            'timestamp': msg.get('timestamp'),
-            'type': msg_type,
-            'text': s(text_body),
-            'interactive': interactive,
-            'audio': msg.get('audio') if msg.get('type') == 'audio' else None,
-            'document': msg.get('document') if msg.get('type') == 'document' else None,
-            'image': msg.get('image') if msg.get('type') == 'image' else None,
-            'video': msg.get('video') if msg.get('type') == 'video' else None,
-            'contact_name': contact_name,
-            'raw_data': webhook_data
-        }
-    except Exception as e:
-        print(f"Erro ao processar webhook: {e}")
-        return None
-    def verify_webhook(self, mode: str, token: str, challenge: str) -> Optional[str]:
-        """Verificar webhook do WhatsApp"""
-        if mode == "subscribe" and token == self.webhook_verify_token:
-            return challenge
-        return None
-    
+            
     def format_phone_number(self, phone: str) -> str:
         """Formatar número de telefone para o padrão internacional"""
         # Remove caracteres não numéricos
