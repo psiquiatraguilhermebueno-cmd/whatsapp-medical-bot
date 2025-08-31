@@ -214,8 +214,8 @@ class WhatsAppService:
                 'status_code': 500
             }
     
-   def parse_webhook_message(self, webhook_data: Dict) -> Optional[Dict]:
-        """Processar mensagem recebida via webhook (robusto para campos None)"""
+       def parse_webhook_message(self, webhook_data: Dict) -> Optional[Dict]:
+        """Processa mensagem recebida via webhook (robusto para campos None)."""
         try:
             if not webhook_data or 'entry' not in webhook_data:
                 return None
@@ -256,20 +256,19 @@ class WhatsAppService:
                 'image': message.get('image') if msg_type == 'image' else None,
                 'video': message.get('video') if msg_type == 'video' else None,
                 'contact_name': ((contact.get('profile') or {}).get('name')) or 'Usuário',
-                'raw_data': webhook_data
+                'raw_data': webhook_data,
             }
         except Exception as e:
             print(f"Erro ao processar webhook: {e}")
             return None
-            
-    def format_phone_number(self, phone: str) -> str:
-        """Formatar número de telefone para o padrão internacional"""
-        # Remove caracteres não numéricos
-        clean_phone = ''.join(filter(str.isdigit, phone))
-        
-        # Se não começar com código do país, adiciona o código do Brasil (55)
-        if not clean_phone.startswith('55') and len(clean_phone) >= 10:
-            clean_phone = '55' + clean_phone
-        
-        return clean_phone
 
+    def format_phone_number(self, phone: str) -> str:
+        """Formata número de telefone para o padrão internacional (Brasil por padrão)."""
+        # Remove tudo que não for dígito
+        clean_phone = ''.join(filter(str.isdigit, phone or ""))
+
+        # Se não começar com DDI do Brasil (55) e tiver tamanho de celular/telefone, prefixa 55
+        if clean_phone and not clean_phone.startswith('55') and len(clean_phone) >= 10:
+            clean_phone = '55' + clean_phone
+
+        return clean_phone
