@@ -147,6 +147,12 @@ class WhatsAppMessageHandler:
                 if patient:
                     return self._handle_reminder_action(phone_number, response_id, patient)
             
+            # Verificar se é confirmação de horário u-ETG
+            if response_id.startswith('slot_'):
+                patient = self._get_or_create_patient(user_info)
+                if patient:
+                    return self._handle_uetg_slot_callback(phone_number, response_id, patient)
+            
             return {"status": "processed", "action": "interactive_handled"}
             
         except Exception as e:
@@ -306,6 +312,31 @@ Vamos começar? Encontre um local confortável e siga as instruções."""
             
         except Exception as e:
             self.logger.error(f"Erro ao iniciar exercício de respiração: {e}")
+            return {"status": "error", "message": str(e)}
+    
+    def _handle_uetg_slot_callback(self, phone_number: str, response_id: str, patient) -> Dict:
+        """Processar clique nos botões de horário u-ETG"""
+        try:
+            from src.jobs.uetg_scheduler import process_button_click
+            
+            # Processar o clique do botão
+            success = process_button_click(response_id, phone_number, patient.name)
+            
+            if success:
+                return {"status": "processed", "action": "uetg_slot_confirmed"}
+            else:
+                self.whatsapp_service.send_text_message(
+                    phone_number,
+                    "❌ Erro ao confirmar horário. Tente novamente ou entre em contato."
+                )
+                return {"status": "error", "action": "uetg_slot_error"}
+                
+        except Exception as e:
+            self.logger.error(f"Erro ao processar confirmação u-ETG: {e}")
+            self.whatsapp_service.send_text_message(
+                phone_number,
+                "❌ Erro interno. Entre em contato com o suporte."
+            )
             return {"status": "error", "message": str(e)}
     
     def notify_admin(self, message: str) -> Dict:
