@@ -1,272 +1,227 @@
-import requests
-import json
+# src/services/whatsapp_service.py
 import os
-from datetime import datetime
-from typing import Dict, List, Optional
+import re
+import json
+import logging
+from typing import Any, Dict, Optional, List
+
+import requests
+
+logger = logging.getLogger(__name__)
+
+API_BASE = "https://graph.facebook.com/v20.0"
+
+def _s(v, default: str = "") -> str:
+    """strip seguro: se for string, .strip(); senão, default."""
+    return v.strip() if isinstance(v, str) else default
+
+def _clean_phone(pn: Optional[str]) -> str:
+    """E.164 sem '+', apenas dígitos."""
+    if not isinstance(pn, str):
+        return ""
+    pn = pn.strip()
+    if pn.startswith("+"):
+        pn = pn[1:]
+    return re.sub(r"\D+", "", pn)
+
+def _headers() -> Dict[str, str]:
+    token = os.getenv("WHATSAPP_TOKEN") or os.getenv("WHATSAPP_ACCESS_TOKEN") or ""
+    return {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+
+def _phone_id() -> str:
+    # Principal e alternativo (você tem dois IDs)
+    return (
+        _s(os.getenv("WHATSAPP_PHONE_NUMBER_ID"))
+        or _s(os.getenv("WABA_PHONE_ID"))
+        or _s(os.getenv("ALT_WHATSAPP_PHONE_NUMBER_ID"))
+        or _s(os.getenv("ALT_WABA_PHONE_ID"))
+    )
 
 class WhatsAppService:
-    """Serviço para integração com WhatsApp Business API"""
-    
-    def __init__(self):
-        # Configurações da API do WhatsApp Business
-        # Estas variáveis devem ser configuradas no ambiente de produção
-        self.access_token = os.getenv('WHATSAPP_ACCESS_TOKEN', '')
-        self.phone_number_id = os.getenv('WHATSAPP_PHONE_NUMBER_ID', '')
-        self.webhook_verify_token = os.getenv('WHATSAPP_WEBHOOK_VERIFY_TOKEN', 'medical_bot_webhook_token')
-        self.base_url = f"https://graph.facebook.com/v18.0/{self.phone_number_id}"
-        
-        # Headers para requisições
-        self.headers = {
-            'Authorization': f'Bearer {self.access_token}',
-            'Content-Type': 'application/json'
+    """Serviço de integração com WhatsApp Cloud API (robusto contra None)."""
+
+    # ---------------- PARSE WEBHOOK ----------------
+
+    def parse_webhook_message(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Devolve sempre:
+        {
+          "type": str, "from": str, "text": str, "message_id": str,
+          "timestamp": str, "contact_name": str, "interactive": dict
         }
-    
-    def send_text_message(self, to: str, message: str) -> Dict:
-        """Enviar mensagem de texto"""
-        url = f"{self.base_url}/messages"
-        
+        """
+        try:
+            entry = (payload.get("entry") or [{}])[0]
+            change = (entry.get("changes") or [{}])[0]
+            value  = change.get("value") or {}
+
+            messages = value.get("messages") or []
+            if not messages:
+                logger.debug("parse_webhook_message: sem 'messages' no payload")
+                return {}
+
+            msg = messages[0]
+
+            msg_type = _s(msg.get("type"))
+            frm      = _clean_phone(msg.get("from"))
+            mid      = _s(msg.get("id") or msg.get("message_id"))
+            ts       = _s(msg.get("timestamp"))
+
+            # Nome do contato (se disponível)
+            contacts = value.get("contacts") or []
+            cname = ""
+            if contacts and isinstance(contacts[0], dict):
+                profile = contacts[0].get("profile") or {}
+                cname = _s(profile.get("name"))
+
+            # Texto pode vir como {"body": "..."} — padronizamos em string
+            txt = msg.get("text")
+            if isinstance(txt, dict):
+                txt = _s(txt.get("body"))
+            else:
+                txt = _s(txt)
+
+            # Interactive (button_reply / list_reply / nfm_reply) — garantir dict
+            interactive = msg.get("interactive")
+            if not isinstance(interactive, dict):
+                interactive = {}
+
+            out = {
+                "type": msg_type,
+                "from": frm,
+                "text": txt,
+                "message_id": mid,
+                "timestamp": ts,
+                "contact_name": cname,
+                "interactive": interactive,
+            }
+            logger.debug("parse_webhook_message OUT: %s", json.dumps(out, ensure_ascii=False))
+            return out
+
+        except Exception as e:
+            logger.error("parse_webhook_message error: %s", e, exc_info=True)
+            # Retorne estrutura segura para não quebrar o handler
+            return {
+                "type": "",
+                "from": "",
+                "text": "",
+                "message_id": "",
+                "timestamp": "",
+                "contact_name": "",
+                "interactive": {},
+            }
+
+    # ---------------- READ STATUS ----------------
+
+    def mark_message_as_read(self, message_id: Optional[str]) -> Dict[str, Any]:
+        message_id = _s(message_id)
+        pid = _phone_id()
+        if not pid or not message_id:
+            logger.debug("mark_message_as_read: faltando phone_id ou message_id")
+            return {"ok": False, "error": "missing_parameters"}
+
+        url = f"{API_BASE}/{pid}/messages"
+        payload = {
+            "messaging_product": "whatsapp",
+            "status": "read",
+            "message_id": message_id,
+        }
+        try:
+            r = requests.post(url, headers=_headers(), data=json.dumps(payload), timeout=15)
+            ok = 200 <= r.status_code < 300
+            if not ok:
+                logger.warning("mark_message_as_read falhou | status=%s | body=%s", r.status_code, r.text)
+            return {"ok": ok, "status": r.status_code, "data": r.json() if ok else r.text}
+        except Exception as e:
+            logger.error("mark_message_as_read exception: %s", e, exc_info=True)
+            return {"ok": False, "error": str(e)}
+
+    # ---------------- SEND TEXT ----------------
+
+    def send_text_message(self, to: Optional[str], body: Optional[str]) -> Dict[str, Any]:
+        to = _clean_phone(to)
+        body = _s(body) or " "
+        pid = _phone_id()
+
+        if not to or not pid:
+            logger.error("send_text_message: parâmetros inválidos | to=%s pid=%s", to, pid)
+            return {"ok": False, "error": "invalid_parameters"}
+
+        url = f"{API_BASE}/{pid}/messages"
         payload = {
             "messaging_product": "whatsapp",
             "to": to,
             "type": "text",
-            "text": {
-                "body": message
-            }
+            "text": {"body": body},
         }
-        
         try:
-            response = requests.post(url, headers=self.headers, json=payload)
-            return {
-                'success': response.status_code == 200,
-                'response': response.json(),
-                'status_code': response.status_code
-            }
+            r = requests.post(url, headers=_headers(), data=json.dumps(payload), timeout=15)
+            ok = 200 <= r.status_code < 300
+            if not ok:
+                logger.error("WA send_text falhou | status=%s | body=%s", r.status_code, r.text)
+            else:
+                logger.info("WA send_text OK | to=%s", to)
+            return {"ok": ok, "status": r.status_code, "data": r.json() if ok else r.text}
         except Exception as e:
-            return {
-                'success': False,
-                'error': str(e),
-                'status_code': 500
-            }
-    
-    def send_interactive_message(self, to: str, header: str, body: str, buttons: List[Dict]) -> Dict:
-        """Enviar mensagem interativa com botões"""
-        url = f"{self.base_url}/messages"
-        
-        # Formatar botões para o formato da API
-        formatted_buttons = []
-        for i, button in enumerate(buttons):
-            formatted_buttons.append({
-                "type": "reply",
-                "reply": {
-                    "id": button.get('id', f"btn_{i}"),
-                    "title": button.get('title', f"Opção {i+1}")
-                }
-            })
-        
-        payload = {
-            "messaging_product": "whatsapp",
-            "to": to,
-            "type": "interactive",
-            "interactive": {
-                "type": "button",
-                "header": {
-                    "type": "text",
-                    "text": header
-                },
-                "body": {
-                    "text": body
-                },
-                "action": {
-                    "buttons": formatted_buttons
-                }
-            }
-        }
-        
-        try:
-            response = requests.post(url, headers=self.headers, json=payload)
-            return {
-                'success': response.status_code == 200,
-                'response': response.json(),
-                'status_code': response.status_code
-            }
-        except Exception as e:
-            return {
-                'success': False,
-                'error': str(e),
-                'status_code': 500
-            }
-    
-    def send_list_message(self, to: str, header: str, body: str, button_text: str, sections: List[Dict]) -> Dict:
-        """Enviar mensagem com lista de opções"""
-        url = f"{self.base_url}/messages"
-        
-        payload = {
-            "messaging_product": "whatsapp",
-            "to": to,
-            "type": "interactive",
-            "interactive": {
-                "type": "list",
-                "header": {
-                    "type": "text",
-                    "text": header
-                },
-                "body": {
-                    "text": body
-                },
-                "action": {
-                    "button": button_text,
-                    "sections": sections
-                }
-            }
-        }
-        
-        try:
-            response = requests.post(url, headers=self.headers, json=payload)
-            return {
-                'success': response.status_code == 200,
-                'response': response.json(),
-                'status_code': response.status_code
-            }
-        except Exception as e:
-            return {
-                'success': False,
-                'error': str(e),
-                'status_code': 500
-            }
-    
-    def send_audio_message(self, to: str, audio_url: str) -> Dict:
-        """Enviar mensagem de áudio"""
-        url = f"{self.base_url}/messages"
-        
-        payload = {
-            "messaging_product": "whatsapp",
-            "to": to,
-            "type": "audio",
-            "audio": {
-                "link": audio_url
-            }
-        }
-        
-        try:
-            response = requests.post(url, headers=self.headers, json=payload)
-            return {
-                'success': response.status_code == 200,
-                'response': response.json(),
-                'status_code': response.status_code
-            }
-        except Exception as e:
-            return {
-                'success': False,
-                'error': str(e),
-                'status_code': 500
-            }
-    
-    def send_document_message(self, to: str, document_url: str, filename: str, caption: str = "") -> Dict:
-        """Enviar documento"""
-        url = f"{self.base_url}/messages"
-        
-        payload = {
-            "messaging_product": "whatsapp",
-            "to": to,
-            "type": "document",
-            "document": {
-                "link": document_url,
-                "filename": filename,
-                "caption": caption
-            }
-        }
-        
-        try:
-            response = requests.post(url, headers=self.headers, json=payload)
-            return {
-                'success': response.status_code == 200,
-                'response': response.json(),
-                'status_code': response.status_code
-            }
-        except Exception as e:
-            return {
-                'success': False,
-                'error': str(e),
-                'status_code': 500
-            }
-    
-    def mark_message_as_read(self, message_id: str) -> Dict:
-        """Marcar mensagem como lida"""
-        url = f"{self.base_url}/messages"
-        
-        payload = {
-            "messaging_product": "whatsapp",
-            "status": "read",
-            "message_id": message_id
-        }
-        
-        try:
-            response = requests.post(url, headers=self.headers, json=payload)
-            return {
-                'success': response.status_code == 200,
-                'response': response.json(),
-                'status_code': response.status_code
-            }
-        except Exception as e:
-            return {
-                'success': False,
-                'error': str(e),
-                'status_code': 500
-            }
-    
-    def parse_webhook_message(self, webhook_data: Dict) -> Optional[Dict]:
-        """Processar mensagem recebida via webhook"""
-        try:
-            if 'entry' not in webhook_data:
-                return None
-            
-            entry = webhook_data['entry'][0]
-            if 'changes' not in entry:
-                return None
-            
-            change = entry['changes'][0]
-            if change.get('field') != 'messages':
-                return None
-            
-            value = change.get('value', {})
-            if 'messages' not in value:
-                return None
-            
-            message = value['messages'][0]
-            contact = value['contacts'][0] if 'contacts' in value else {}
-            
-            return {
-                'message_id': message.get('id'),
-                'from': message.get('from'),
-                'timestamp': message.get('timestamp'),
-                'type': message.get('type'),
-                'text': message.get('text', {}).get('body') if message.get('type') == 'text' else None,
-                'interactive': message.get('interactive') if message.get('type') == 'interactive' else None,
-                'audio': message.get('audio') if message.get('type') == 'audio' else None,
-                'document': message.get('document') if message.get('type') == 'document' else None,
-                'image': message.get('image') if message.get('type') == 'image' else None,
-                'video': message.get('video') if message.get('type') == 'video' else None,
-                'contact_name': contact.get('profile', {}).get('name', 'Usuário'),
-                'raw_data': webhook_data
-            }
-        except Exception as e:
-            print(f"Erro ao processar webhook: {e}")
-            return None
-    
-    def verify_webhook(self, mode: str, token: str, challenge: str) -> Optional[str]:
-        """Verificar webhook do WhatsApp"""
-        if mode == "subscribe" and token == self.webhook_verify_token:
-            return challenge
-        return None
-    
-    def format_phone_number(self, phone: str) -> str:
-        """Formatar número de telefone para o padrão internacional"""
-        # Remove caracteres não numéricos
-        clean_phone = ''.join(filter(str.isdigit, phone))
-        
-        # Se não começar com código do país, adiciona o código do Brasil (55)
-        if not clean_phone.startswith('55') and len(clean_phone) >= 10:
-            clean_phone = '55' + clean_phone
-        
-        return clean_phone
+            logger.error("send_text_message exception: %s", e, exc_info=True)
+            return {"ok": False, "error": str(e)}
 
+    # ---------------- SEND INTERACTIVE (BUTTONS) ----------------
+
+    def send_interactive_message(
+        self,
+        to: Optional[str],
+        header_text: Optional[str],
+        body_text: Optional[str],
+        buttons: Optional[List[Dict[str, Any]]],
+    ) -> Dict[str, Any]:
+        to = _clean_phone(to)
+        header_text = _s(header_text)
+        body_text = _s(body_text) or " "
+        pid = _phone_id()
+
+        if not to or not pid:
+            logger.error("send_interactive_message: parâmetros inválidos | to=%s pid=%s", to, pid)
+            return {"ok": False, "error": "invalid_parameters"}
+
+        # Sanitiza botões
+        safe_buttons = []
+        for b in (buttons or []):
+            if not isinstance(b, dict):
+                continue
+            rid = _s(b.get("id"))
+            ttl = _s(b.get("title"))
+            if not rid and not ttl:
+                continue
+            safe_buttons.append({"type": "reply", "reply": {"id": rid or ttl or "opt", "title": ttl or rid or "Opção"}})
+
+        interactive = {
+            "type": "button",
+            "body": {"text": body_text},
+            "action": {"buttons": safe_buttons or [{"type":"reply","reply":{"id":"opt","title":"OK"}}]},
+        }
+        if header_text:
+            interactive["header"] = {"type": "text", "text": header_text}
+
+        url = f"{API_BASE}/{pid}/messages"
+        payload = {
+            "messaging_product": "whatsapp",
+            "to": to,
+            "type": "interactive",
+            "interactive": interactive,
+        }
+
+        try:
+            r = requests.post(url, headers=_headers(), data=json.dumps(payload), timeout=15)
+            ok = 200 <= r.status_code < 300
+            if not ok:
+                logger.error("WA send_buttons falhou | status=%s | body=%s", r.status_code, r.text)
+            else:
+                logger.info("WA send_buttons OK | to=%s", to)
+            return {"ok": ok, "status": r.status_code, "data": r.json() if ok else r.text}
+        except Exception as e:
+            logger.error("send_interactive_message exception: %s", e, exc_info=True)
+            return {"ok": False, "error": str(e)}
