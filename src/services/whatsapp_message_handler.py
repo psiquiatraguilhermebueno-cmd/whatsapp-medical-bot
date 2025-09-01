@@ -77,7 +77,9 @@ class WhatsAppMessageHandler:
                 return {"status": "processed", "action": "unsupported_message_type"}
 
        except Exception as e:
-    self.logger.error(f"Erro ao processar webhook: {e}\n{traceback.format_exc()}")
+    import traceback
+    print(f"Erro ao processar mensagem: {e}")
+    print(traceback.format_exc())  # <<< força stack trace no console
     return {"status": "error", "message": str(e)}
 
     def _handle_text_message(
@@ -109,6 +111,7 @@ class WhatsAppMessageHandler:
             return {"status": "error", "message": str(e)}
 
     def _handle_interactive_message(
+        print("[webhook] interactive payload:", interactive_data)
         self.logger.info(f"[webhook] interactive payload: {interactive_data}")
         self, phone_number: str, interactive_data: Dict, user_info: Dict
     ) -> Dict:
@@ -218,8 +221,10 @@ class WhatsAppMessageHandler:
             return {"status": "processed", "action": "interactive_handled"}
 
         except Exception as e:
-            self.logger.error(f"Erro ao processar mensagem interativa: {e}\n{traceback.format_exc()}")
-            return {"status": "error", "message": str(e)}
+    import traceback
+    print(f"Erro ao processar mensagem interativa: {e}")
+    print(traceback.format_exc())  # <<< força stack trace no console
+    return {"status": "error", "message": str(e)}
 
     def _handle_admin_command(
         self, phone_number: str, command: str, user_info: Dict
