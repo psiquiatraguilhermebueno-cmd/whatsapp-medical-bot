@@ -81,7 +81,7 @@ class WhatsAppMessageHandler:
             message_data = self.whatsapp_service.parse_webhook_message(webhook_data)
             if not message_data:
                 return {"status":"ignored","reason":"Invalid webhook data"}
-                self.logger.debug("SANITIZED message_data: %s", json.dumps(message_data, ensure_ascii=False)
+                self.logger.debug("SANITIZED message_data: %s", json.dumps(message_data, ensure_ascii=False))
 
             # 2) SANITIZAÇÃO (evita .strip() em None em qualquer caminho abaixo)
             message_data = self._sanitize_message_data(message_data)
