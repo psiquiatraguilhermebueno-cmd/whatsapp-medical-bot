@@ -76,9 +76,9 @@ class WhatsAppMessageHandler:
                 )
                 return {"status": "processed", "action": "unsupported_message_type"}
 
-        except Exception as e:
-            self.logger.error(f"Erro ao processar webhook: {e}")
-            return {"status": "error", "message": str(e)}
+       except Exception as e:
+    self.logger.error(f"Erro ao processar webhook: {e}\n{traceback.format_exc()}")
+    return {"status": "error", "message": str(e)}
 
     def _handle_text_message(
         self, phone_number: str, message_text: str, user_info: Dict
@@ -109,6 +109,7 @@ class WhatsAppMessageHandler:
             return {"status": "error", "message": str(e)}
 
     def _handle_interactive_message(
+        self.logger.info(f"[webhook] interactive payload: {interactive_data}")
         self, phone_number: str, interactive_data: Dict, user_info: Dict
     ) -> Dict:
         """Processar mensagem interativa (botões/listas)"""
@@ -217,7 +218,7 @@ class WhatsAppMessageHandler:
             return {"status": "processed", "action": "interactive_handled"}
 
         except Exception as e:
-            self.logger.error(f"Erro ao processar mensagem interativa: {e}")
+            self.logger.error(f"Erro ao processar mensagem interativa: {e}\n{traceback.format_exc()}")
             return {"status": "error", "message": str(e)}
 
     def _handle_admin_command(
@@ -354,13 +355,22 @@ Aguarde os lembretes automáticos ou digite *menu* para ver as opções disponí
         return patient
 
     def _is_admin(self, phone_number: str) -> bool:
-        """Verificar se o número é de um administrador"""
-        if not self.admin_phone:
-            return False
-
-        # Suportar múltiplos admins separados por vírgula
-        admin_phones = [phone.strip() for phone in self.admin_phone.split(",")]
-        return phone_number in admin_phones
+    """Verificar se o número é de um administrador (robusto contra None)."""
+    try:
+        raw_admins = os.getenv('ADMIN_PHONE_NUMBER') or self.admin_phone or ''
+        raw_admins = str(raw_admins)  # garante string
+        admins = []
+        for item in raw_admins.split(','):
+            if isinstance(item, str):
+                item = item.strip()
+                if item:
+                    admins.append(item)
+        pn = phone_number or ''
+        pn = pn.strip() if isinstance(pn, str) else ''
+        return pn in admins if pn else False
+    except Exception as e:
+        self.logger.error(f"_is_admin error: {e}\n{traceback.format_exc()}")
+        return False
 
     def _start_breathing_exercise(
         self, phone_number: str, exercise_id: int, patient: Patient
