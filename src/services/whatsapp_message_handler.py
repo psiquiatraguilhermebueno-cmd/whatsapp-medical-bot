@@ -79,7 +79,7 @@ class WhatsAppMessageHandler:
        except Exception as e:
     import traceback
     print(f"Erro ao processar mensagem: {e}")
-    print(traceback.format_exc())  # <<< força stack trace no console
+    print(traceback.format_exc())
     return {"status": "error", "message": str(e)}
 
     def _handle_text_message(
@@ -111,120 +111,107 @@ class WhatsAppMessageHandler:
             return {"status": "error", "message": str(e)}
 
     def _handle_interactive_message(
+    def _handle_interactive_message(self, phone_number: str, interactive_data: Dict, user_info: Dict) -> Dict:
+    """Processar mensagem interativa (botões/listas)"""
+    try:
+        # Log do payload para depuração
         print("[webhook] interactive payload:", interactive_data)
         self.logger.info(f"[webhook] interactive payload: {interactive_data}")
-        self, phone_number: str, interactive_data: Dict, user_info: Dict
-    ) -> Dict:
-        """Processar mensagem interativa (botões/listas)"""
-        try:
-            # Extrair ID da resposta de forma robusta
-            response_id = None
-            response_title = None
 
-            if interactive_data.get("type") == "button_reply":
-                button_reply = interactive_data.get("button_reply", {})
-                response_id = (button_reply.get("id") or "").strip()
-                response_title = (button_reply.get("title") or "").strip()
-            elif interactive_data.get("type") == "list_reply":
-                list_reply = interactive_data.get("list_reply", {})
-                response_id = (list_reply.get("id") or "").strip()
-                response_title = (list_reply.get("title") or "").strip()
+        # Normalização defensiva
+        data = interactive_data or {}
+        itype = data.get("type") or ""
 
-            # Usar ID ou título como fallback
-            final_response = response_id or response_title
+        btn = data.get("button_reply") or {}
+        lr  = data.get("list_reply")   or {}
 
-            if not final_response:
-                self.logger.error(
-                    "Nenhum ID ou título encontrado na resposta interativa"
+        # Extrair ID OU título (sem .strip() em None)
+        response_id = ""
+        if itype == "button_reply":
+            response_id = (btn.get("id") or btn.get("title") or "")
+        elif itype == "list_reply":
+            response_id = (lr.get("id") or lr.get("title") or "")
+
+        if not response_id:
+            self.logger.error("Nenhum ID ou título encontrado na resposta interativa")
+            return {"status": "error", "message": "No response ID or title"}
+
+        self.logger.info(f"Resposta interativa recebida: {response_id}")
+
+        # Mapeamento de títulos -> IDs válidos de u-ETG
+        slot_ids = {"slot_0730", "slot_1215", "slot_1900"}
+        slot_titles = {"07:30": "slot_0730", "12:15": "slot_1215", "19:00": "slot_1900"}
+
+        # Se vier título, converte para ID
+        normalized = slot_titles.get(response_id, response_id)
+
+        # 1) Confirmação u-ETG (trata e encerra)
+        if normalized in slot_ids or normalized.startswith("slot_"):
+            try:
+                from src.jobs.uetg_scheduler import process_button_click
+                patient = self._get_or_create_patient(user_info)
+                patient_name = patient.name if patient else (user_info.get("name") or "Paciente")
+                ok = process_button_click(normalized, phone_number, patient_name)
+                if ok:
+                    return {"status": "processed", "action": "uetg_slot_confirmed"}
+                else:
+                    self.whatsapp_service.send_text_message(
+                        phone_number, "❌ Erro ao confirmar horário. Tente novamente."
+                    )
+                    return {"status": "error", "action": "uetg_slot_error"}
+            except Exception as e:
+                import traceback
+                self.logger.error(f"Erro ao processar confirmação u-ETG: {e}")
+                self.logger.error(traceback.format_exc())
+                self.whatsapp_service.send_text_message(
+                    phone_number, "❌ Erro interno. Tente novamente mais tarde."
                 )
-                return {"status": "error", "message": "No response ID found"}
+                return {"status": "error", "message": str(e)}
 
-            self.logger.info(f"Resposta interativa recebida: {final_response}")
+        # 2) Não é u-ETG: fluxo normal
 
-            # Mapeamento de horários para IDs de botão
-            time_to_slot_mapping = {
-                "07:30": "slot_0730",
-                "12:00": "slot_1200",
-                "12:15": "slot_1215",
-                "16:40": "slot_1640",
-                "19:00": "slot_1900",
-            }
+        # Admin
+        if self._is_admin(phone_number):
+            return self._handle_admin_callback(phone_number, response_id, user_info)
 
-            # Verificar se é um horário (título do botão)
-            if final_response in time_to_slot_mapping:
-                final_response = time_to_slot_mapping[final_response]
-                self.logger.info(f"Mapeado horário para slot: {final_response}")
+        # Questionários
+        if response_id.startswith('start_questionnaire_') or response_id.startswith('questionnaire_'):
+            patient = self._get_or_create_patient(user_info)
+            if patient:
+                return self._handle_questionnaire_callback(phone_number, response_id, patient)
 
-            # Verificar se é ação administrativa
-            if self._is_admin(phone_number):
-                return self._handle_admin_callback(
-                    phone_number, final_response, user_info
-                )
+        # Medicação
+        if response_id.startswith('medication_'):
+            patient = self._get_or_create_patient(user_info)
+            if patient:
+                return self._handle_medication_callback(phone_number, response_id, patient)
 
-            # Verificar se é confirmação de horário u-ETG
-            if final_response.startswith("slot_"):
-                patient = self._get_or_create_patient(user_info)
-                if patient:
-                    return self._handle_uetg_slot_callback(
-                        phone_number, final_response, patient
-                    )
+        # Humor
+        if response_id.startswith('mood_') or response_id.startswith('start_mood_'):
+            patient = self._get_or_create_patient(user_info)
+            if patient:
+                return self._handle_mood_callback(phone_number, response_id, patient)
 
-            # Verificar se é resposta de questionário
-            if final_response.startswith("questionnaire_") or final_response.startswith(
-                "start_questionnaire_"
-            ):
-                patient = self._get_or_create_patient(user_info)
-                if patient:
-                    return self._handle_questionnaire_callback(
-                        phone_number, final_response, patient
-                    )
+        # Respiração
+        if response_id.startswith('breathing_') or response_id.startswith('start_breathing_'):
+            patient = self._get_or_create_patient(user_info)
+            if patient:
+                return self._handle_breathing_callback(phone_number, response_id, patient)
 
-            # Verificar se é confirmação de medicação
-            if final_response.startswith("medication_"):
-                patient = self._get_or_create_patient(user_info)
-                if patient:
-                    return self._handle_medication_callback(
-                        phone_number, final_response, patient
-                    )
+        # Lembretes (soneca/ignorar)
+        if response_id.startswith('snooze_') or response_id.startswith('skip_'):
+            patient = self._get_or_create_patient(user_info)
+            if patient:
+                return self._handle_reminder_action(phone_number, response_id, patient)
 
-            # Verificar se é registro de humor
-            if final_response.startswith("mood_") or final_response.startswith(
-                "start_mood_"
-            ):
-                patient = self._get_or_create_patient(user_info)
-                if patient:
-                    return self._handle_mood_callback(
-                        phone_number, final_response, patient
-                    )
+        self.logger.info(f"Resposta interativa não reconhecida: {response_id}")
+        return {"status": "processed", "action": "interactive_handled"}
 
-            # Verificar se é exercício de respiração
-            if final_response.startswith("breathing_") or final_response.startswith(
-                "start_breathing_"
-            ):
-                patient = self._get_or_create_patient(user_info)
-                if patient:
-                    return self._handle_breathing_callback(
-                        phone_number, final_response, patient
-                    )
-
-            # Verificar se é ação de lembrete (snooze, skip)
-            if final_response.startswith("snooze_") or final_response.startswith(
-                "skip_"
-            ):
-                patient = self._get_or_create_patient(user_info)
-                if patient:
-                    return self._handle_reminder_action(
-                        phone_number, final_response, patient
-                    )
-
-            self.logger.info(f"Resposta interativa não reconhecida: {final_response}")
-            return {"status": "processed", "action": "interactive_handled"}
-
-        except Exception as e:
-    import traceback
-    print(f"Erro ao processar mensagem interativa: {e}")
-    print(traceback.format_exc())  # <<< força stack trace no console
-    return {"status": "error", "message": str(e)}
+    except Exception as e:
+        import traceback
+        print(f"Erro ao processar mensagem interativa: {e}")
+        print(traceback.format_exc())
+        return {"status": "error", "message": str(e)}
 
     def _handle_admin_command(
         self, phone_number: str, command: str, user_info: Dict
