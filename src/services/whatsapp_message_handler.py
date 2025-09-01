@@ -110,22 +110,17 @@ class WhatsAppMessageHandler:
             self.logger.error(f"Erro ao processar mensagem de texto: {e}")
             return {"status": "error", "message": str(e)}
 
-    def _handle_interactive_message(
-    def _handle_interactive_message(self, phone_number: str, interactive_data: Dict, user_info: Dict) -> Dict:
+   def _handle_interactive_message(self, phone_number: str, interactive_data: Dict, user_info: Dict) -> Dict:
     """Processar mensagem interativa (botões/listas)"""
     try:
-        # Log do payload para depuração
         print("[webhook] interactive payload:", interactive_data)
         self.logger.info(f"[webhook] interactive payload: {interactive_data}")
 
-        # Normalização defensiva
         data = interactive_data or {}
         itype = data.get("type") or ""
-
         btn = data.get("button_reply") or {}
         lr  = data.get("list_reply")   or {}
 
-        # Extrair ID OU título (sem .strip() em None)
         response_id = ""
         if itype == "button_reply":
             response_id = (btn.get("id") or btn.get("title") or "")
@@ -138,14 +133,11 @@ class WhatsAppMessageHandler:
 
         self.logger.info(f"Resposta interativa recebida: {response_id}")
 
-        # Mapeamento de títulos -> IDs válidos de u-ETG
-        slot_ids = {"slot_0730", "slot_1215", "slot_1900"}
+        slot_ids    = {"slot_0730", "slot_1215", "slot_1900"}
         slot_titles = {"07:30": "slot_0730", "12:15": "slot_1215", "19:00": "slot_1900"}
 
-        # Se vier título, converte para ID
         normalized = slot_titles.get(response_id, response_id)
 
-        # 1) Confirmação u-ETG (trata e encerra)
         if normalized in slot_ids or normalized.startswith("slot_"):
             try:
                 from src.jobs.uetg_scheduler import process_button_click
@@ -155,20 +147,14 @@ class WhatsAppMessageHandler:
                 if ok:
                     return {"status": "processed", "action": "uetg_slot_confirmed"}
                 else:
-                    self.whatsapp_service.send_text_message(
-                        phone_number, "❌ Erro ao confirmar horário. Tente novamente."
-                    )
+                    self.whatsapp_service.send_text_message(phone_number, "❌ Erro ao confirmar horário. Tente novamente.")
                     return {"status": "error", "action": "uetg_slot_error"}
             except Exception as e:
                 import traceback
                 self.logger.error(f"Erro ao processar confirmação u-ETG: {e}")
                 self.logger.error(traceback.format_exc())
-                self.whatsapp_service.send_text_message(
-                    phone_number, "❌ Erro interno. Tente novamente mais tarde."
-                )
+                self.whatsapp_service.send_text_message(phone_number, "❌ Erro interno. Tente novamente mais tarde.")
                 return {"status": "error", "message": str(e)}
-
-        # 2) Não é u-ETG: fluxo normal
 
         # Admin
         if self._is_admin(phone_number):
@@ -198,7 +184,7 @@ class WhatsAppMessageHandler:
             if patient:
                 return self._handle_breathing_callback(phone_number, response_id, patient)
 
-        # Lembretes (soneca/ignorar)
+        # Lembretes
         if response_id.startswith('snooze_') or response_id.startswith('skip_'):
             patient = self._get_or_create_patient(user_info)
             if patient:
@@ -212,7 +198,7 @@ class WhatsAppMessageHandler:
         print(f"Erro ao processar mensagem interativa: {e}")
         print(traceback.format_exc())
         return {"status": "error", "message": str(e)}
-
+        
     def _handle_admin_command(
         self, phone_number: str, command: str, user_info: Dict
     ) -> Dict:
