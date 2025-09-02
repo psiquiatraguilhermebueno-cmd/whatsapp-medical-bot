@@ -145,29 +145,30 @@ class WhatsAppMessageHandler:
             return {"status": "error", "message": "No response ID or title"}
 
         self.logger.info(f"Resposta interativa recebida: {response_id}")
-
-        slot_ids    = {"slot_0730", "slot_1215", "slot_1900"}
+        # === u-ETG: normalização + AUTO-CADASTRO + BYPASS DE GUARDS ===
+        slot_ids = {"slot_0730", "slot_1215", "slot_1900"}
         slot_titles = {"07:30": "slot_0730", "12:15": "slot_1215", "19:00": "slot_1900"}
 
-        normalized = slot_titles.get(response_id, response_id)
+        # normaliza caso venha “12:15”, “07:30” etc.
+        normalized_id = slot_titles.get(response_id, response_id)
 
-        if normalized in slot_ids or normalized.startswith("slot_"):
+        # auto-cadastro silencioso (idempotente)
+        try:
+            patient = self._get_or_create_patient(user_info)
             try:
-                from src.jobs.uetg_scheduler import process_button_click
-                patient = self._get_or_create_patient(user_info)
-                patient_name = patient.name if patient else (user_info.get("name") or "Paciente")
-                ok = process_button_click(normalized, phone_number, patient_name)
-                if ok:
-                    return {"status": "processed", "action": "uetg_slot_confirmed"}
-                else:
-                    self.whatsapp_service.send_text_message(phone_number, "❌ Erro ao confirmar horário. Tente novamente.")
-                    return {"status": "error", "action": "uetg_slot_error"}
-            except Exception as e:
-                import traceback
-                self.logger.error(f"Erro ao processar confirmação u-ETG: {e}")
-                self.logger.error(traceback.format_exc())
-                self.whatsapp_service.send_text_message(phone_number, "❌ Erro interno. Tente novamente mais tarde.")
-                return {"status": "error", "message": str(e)}
+                if patient and getattr(patient, "is_active", None) is False:
+                    patient.is_active = True
+                    db.session.commit()
+            except Exception:
+                pass
+        except Exception:
+            self.logger.warning("Auto-cadastro no clique falhou (segue fluxo).", exc_info=True)
+            patient = None
+
+        # BYPASS: se for um dos slots u-ETG, processa imediatamente e NÃO passa por guards
+        if normalized_id in slot_ids or str(normalized_id).startswith("slot_"):
+            return self._handle_uetg_slot_callback(phone_number, normalized_id, patient)
+
 
         # Admin
         if self._is_admin(phone_number):
