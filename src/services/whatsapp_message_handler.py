@@ -110,51 +110,59 @@ class WhatsAppMessageHandler:
             self.logger.error(f"Erro ao processar mensagem de texto: {e}")
             return {"status": "error", "message": str(e)}
 
-   def _handle_interactive_message(self, phone_number: str, interactive_data: Dict, user_info: Dict) -> Dict:
-    """Processar mensagem interativa (botões/listas)"""
-    try:        # AUTO-CADASTRO NO CLIQUE (u-ETG/admin)
+def _handle_interactive_message(self, phone_number: str, interactive_data: Dict[str, Any], user_info: Dict[str, Any]) -> Dict[str, Any]:
+    """Processar mensagem interativa (botões/listas) com bypass explícito p/ u-ETG."""
+    try:
+        pn = _clean_phone(phone_number or "")
+
+        # 1) Normalização robusta do payload
         try:
-            patient_autocreate = self._get_or_create_patient({
-                "phone_number": phone_number,
-                "name": user_info.get("name")
-            })
-            try:
-                if patient_autocreate and getattr(patient_autocreate, "is_active", None) is False:
-                    patient_autocreate.is_active = True
-                    db.session.commit()
-            except Exception:
-                pass
+            self.logger.debug("RAW INTERACTIVE: %s", json.dumps(interactive_data, ensure_ascii=False))
         except Exception:
-            self.logger.warning("Auto-cadastro no clique falhou (segue fluxo).", exc_info=True)
-        print("[webhook] interactive payload:", interactive_data)
-        self.logger.info(f"[webhook] interactive payload: {interactive_data}")
+            pass
 
         data = interactive_data or {}
-        itype = data.get("type") or ""
-        btn = data.get("button_reply") or {}
-        lr  = data.get("list_reply")   or {}
+        itype = _s(data.get("type"))
+        br = data.get("button_reply") or {}
+        lr = data.get("list_reply") or {}
+        nfm = data.get("nfm_reply") or {}
 
-        response_id = ""
+        rid, title = "", ""
         if itype == "button_reply":
-            response_id = (btn.get("id") or btn.get("title") or "")
+            rid = _s(br.get("id")); title = _s(br.get("title"))
         elif itype == "list_reply":
-            response_id = (lr.get("id") or lr.get("title") or "")
+            rid = _s(lr.get("id")); title = _s(lr.get("title"))
+        elif itype == "nfm_reply":
+            title = _s(nfm.get("body"))
+            rid = _s(nfm.get("response_json")) or title
 
+        response_id = rid or title
         if not response_id:
-            self.logger.error("Nenhum ID ou título encontrado na resposta interativa")
+            self.logger.error("Interactive sem id/title")
+            self.whatsapp_service.send_text_message(pn, "Recebi seu clique, mas não identifiquei a opção. Pode tentar novamente?")
             return {"status": "error", "message": "No response ID or title"}
 
-        self.logger.info(f"Resposta interativa recebida: {response_id}")
-        # === u-ETG: normalização + AUTO-CADASTRO + BYPASS DE GUARDS ===
-        slot_ids = {"slot_0730", "slot_1215", "slot_1900"}
+        self.logger.info("Interactive click | from=%s | resp=%s | title=%s", pn, response_id, title or "-")
+
+        # 2) Mapas fixos de slots u-ETG
+        slot_ids    = {"slot_0730", "slot_1215", "slot_1900"}
         slot_titles = {"07:30": "slot_0730", "12:15": "slot_1215", "19:00": "slot_1900"}
 
-        # normaliza caso venha “12:15”, “07:30” etc.
+        # aceitar 1215 / 12h15 / 12:15 → canônico
+        hhmm_digits = re.fullmatch(r"\s*(\d{3,4})\s*", response_id or "")
+        if hhmm_digits and ":" not in response_id:
+            num = hhmm_digits.group(1)
+            response_id = f"{int(num[:-2]):02d}:{num[-2:]}" if len(num) == 3 else f"{num[:2]}:{num[2:]}"
+        m = re.search(r"(\d{1,2})[:hH]?(\d{2})", response_id or "")
+        if m and response_id not in slot_titles and response_id not in slot_ids:
+            candidate = f"{int(m.group(1)):02d}:{m.group(2)}"
+            response_id = slot_titles.get(candidate, response_id)
+
         normalized_id = slot_titles.get(response_id, response_id)
 
-        # auto-cadastro silencioso (idempotente)
+        # 3) AUTO-CADASTRO silencioso (idempotente)
         try:
-            patient = self._get_or_create_patient(user_info)
+            patient = self._get_or_create_patient({"phone_number": pn, "name": user_info.get("name")})
             try:
                 if patient and getattr(patient, "is_active", None) is False:
                     patient.is_active = True
@@ -165,309 +173,48 @@ class WhatsAppMessageHandler:
             self.logger.warning("Auto-cadastro no clique falhou (segue fluxo).", exc_info=True)
             patient = None
 
-        # BYPASS: se for um dos slots u-ETG, processa imediatamente e NÃO passa por guards
+        # 4) BYPASS EXPLÍCITO: se for u-ETG, processa AGORA e NÃO passa por guards
         if normalized_id in slot_ids or str(normalized_id).startswith("slot_"):
-            return self._handle_uetg_slot_callback(phone_number, normalized_id, patient)
+            return self._handle_uetg_slot_callback(pn, normalized_id, patient)
 
+        # 5) Admin callbacks
+        if self._is_admin(pn):
+            return self._handle_admin_callback(pn, response_id, user_info)
 
-        # Admin
-        if self._is_admin(phone_number):
-            return self._handle_admin_callback(phone_number, response_id, user_info)
-
-        # Questionários
-        if response_id.startswith('start_questionnaire_') or response_id.startswith('questionnaire_'):
-            patient = self._get_or_create_patient(user_info)
+        # 6) Questionários
+        if response_id.startswith(("start_questionnaire_", "questionnaire_")):
             if patient:
-                return self._handle_questionnaire_callback(phone_number, response_id, patient)
+                return self._handle_questionnaire_callback(pn, response_id, patient)
 
-        # Medicação
-        if response_id.startswith('medication_'):
-            patient = self._get_or_create_patient(user_info)
+        # 7) Medicação
+        if response_id.startswith("medication_"):
             if patient:
-                return self._handle_medication_callback(phone_number, response_id, patient)
+                return self._handle_medication_callback(pn, response_id, patient)
 
-        # Humor
-        if response_id.startswith('mood_') or response_id.startswith('start_mood_'):
-            patient = self._get_or_create_patient(user_info)
+        # 8) Humor
+        if response_id.startswith(("mood_", "start_mood_")):
             if patient:
-                return self._handle_mood_callback(phone_number, response_id, patient)
+                return self._handle_mood_callback(pn, response_id, patient)
 
-        # Respiração
-        if response_id.startswith('breathing_') or response_id.startswith('start_breathing_'):
-            patient = self._get_or_create_patient(user_info)
+        # 9) Respiração
+        if response_id.startswith(("breathing_", "start_breathing_")):
             if patient:
-                return self._handle_breathing_callback(phone_number, response_id, patient)
+                return self._handle_breathing_callback(pn, response_id, patient)
 
-        # Lembretes
-        if response_id.startswith('snooze_') or response_id.startswith('skip_'):
-            patient = self._get_or_create_patient(user_info)
+        # 10) Lembretes
+        if response_id.startswith(("snooze_", "skip_")):
             if patient:
-                return self._handle_reminder_action(phone_number, response_id, patient)
+                return self._handle_reminder_action(pn, response_id, patient)
 
-        self.logger.info(f"Resposta interativa não reconhecida: {response_id}")
+        # 11) Fallback neutro
+        self.whatsapp_service.send_text_message(pn, "Opção recebida. Já anotei aqui. ✅")
         return {"status": "processed", "action": "interactive_handled"}
 
     except Exception as e:
-        import traceback
-        print(f"Erro ao processar mensagem interativa: {e}")
-        print(traceback.format_exc())
+        self.logger.error("Erro no interactive: %s", e)
+        self.logger.debug(traceback.format_exc())
+        try:
+            self.whatsapp_service.send_text_message(_clean_phone(phone_number), "❌ Erro ao processar seu clique. Tente outra vez.")
+        except Exception:
+            pass
         return {"status": "error", "message": str(e)}
-        
-    def _handle_admin_command(
-        self, phone_number: str, command: str, user_info: Dict
-    ) -> Dict:
-        """Processar comando administrativo"""
-        return self.admin_service.handle_command(phone_number, command, user_info)
-
-    def _handle_admin_callback(
-        self, phone_number: str, callback_data: str, user_info: Dict
-    ) -> Dict:
-        """Processar callback administrativo"""
-        return self.admin_service.handle_callback(
-            phone_number, callback_data, user_info
-        )
-
-    def _handle_questionnaire_callback(
-        self, phone_number: str, callback_data: str, patient: Patient
-    ) -> Dict:
-        """Processar callback de questionário"""
-        if callback_data.startswith("start_questionnaire_"):
-            # Extrair nome da escala
-            scale_name = callback_data.replace("start_questionnaire_", "")
-            return self.questionnaire_service.start_questionnaire(
-                phone_number, scale_name, patient
-            )
-        elif callback_data.startswith("questionnaire_answer_"):
-            return self.questionnaire_service.handle_response(
-                phone_number, callback_data, patient
-            )
-        else:
-            return {"status": "processed", "action": "questionnaire_callback_handled"}
-
-    def _handle_medication_callback(
-        self, phone_number: str, callback_data: str, patient: Patient
-    ) -> Dict:
-        """Processar callback de medicação"""
-        return self.scheduler_service.handle_medication_confirmation(
-            phone_number, callback_data, patient
-        )
-
-    def _handle_mood_callback(
-        self, phone_number: str, callback_data: str, patient: Patient
-    ) -> Dict:
-        """Processar callback de humor"""
-        if callback_data == "start_mood_chart":
-            return self.mood_service.start_mood_chart(phone_number, patient)
-        elif callback_data.startswith("mood_"):
-            return self.mood_service.handle_mood_response(
-                phone_number, callback_data, patient
-            )
-        else:
-            return {"status": "processed", "action": "mood_callback_handled"}
-
-    def _handle_breathing_callback(
-        self, phone_number: str, callback_data: str, patient: Patient
-    ) -> Dict:
-        """Processar callback de exercício de respiração"""
-        if callback_data.startswith("start_breathing_"):
-            exercise_id = int(callback_data.split("_")[-1])
-            return self._start_breathing_exercise(phone_number, exercise_id, patient)
-        else:
-            return {"status": "processed", "action": "breathing_callback_handled"}
-
-    def _handle_reminder_action(
-        self, phone_number: str, callback_data: str, patient: Patient
-    ) -> Dict:
-        """Processar ações de lembrete (snooze, skip)"""
-        if callback_data.startswith("snooze_"):
-            return self.scheduler_service.handle_reminder_snooze(
-                phone_number, callback_data, patient
-            )
-        elif callback_data.startswith("skip_"):
-            return self.scheduler_service.handle_reminder_skip(
-                phone_number, callback_data, patient
-            )
-        else:
-            return {"status": "processed", "action": "reminder_action_handled"}
-
-    def _send_welcome_message(self, phone_number: str, user_info: Dict) -> Dict:
-        """Enviar mensagem de boas-vindas"""
-        name = user_info.get("name", "")
-
-        if self._is_admin(phone_number):
-            message = f"""👋 Olá{f', {name}' if name else ''}!
-
-🏥 *Painel Administrativo - Bot de Lembretes Médicos*
-
-Use os comandos abaixo para gerenciar o sistema:
-
-📋 */menu* - Menu principal
-👥 */pacientes* - Gerenciar pacientes  
-⏰ */lembretes* - Gerenciar lembretes
-📊 */relatorios* - Ver relatórios
-⚙️ */sistema* - Configurações
-📈 */status* - Status rápido
-
-Digite qualquer comando para começar!"""
-        else:
-            message = f"""👋 Olá{f', {name}' if name else ''}!
-
-🏥 *Bot de Lembretes Médicos*
-
-Sou seu assistente para:
-• 📋 Questionários de saúde
-• 💊 Lembretes de medicação  
-• 😊 Registro de humor
-• 🫁 Exercícios de respiração
-
-Aguarde os lembretes automáticos ou digite *menu* para ver as opções disponíveis."""
-
-        self.whatsapp_service.send_text_message(phone_number, message)
-        return {"status": "sent", "action": "welcome_message_sent"}
-
-    def _get_or_create_patient(self, user_info: Dict) -> Patient:
-        """Obter ou criar paciente"""
-        phone_number = user_info.get("phone_number")
-        if not phone_number:
-            return None
-
-        # Buscar paciente existente
-        patient = Patient.query.filter_by(whatsapp_phone=phone_number).first()
-
-        if not patient:
-            # Criar novo paciente
-            patient = Patient(
-                name=user_info.get("name", f"Paciente {phone_number[-4:]}"),
-                whatsapp_phone=phone_number,
-                is_active=True,
-            )
-            db.session.add(patient)
-            db.session.commit()
-
-        return patient
-
-    def _is_admin(self, phone_number: str) -> bool:
-    """Verificar se o número é de um administrador (robusto contra None)."""
-    try:
-        raw_admins = os.getenv('ADMIN_PHONE_NUMBER') or self.admin_phone or ''
-        raw_admins = str(raw_admins)  # garante string
-        admins = []
-        for item in raw_admins.split(','):
-            if isinstance(item, str):
-                item = item.strip()
-                if item:
-                    admins.append(item)
-        pn = phone_number or ''
-        pn = pn.strip() if isinstance(pn, str) else ''
-        return pn in admins if pn else False
-    except Exception as e:
-        self.logger.error(f"_is_admin error: {e}\n{traceback.format_exc()}")
-        return False
-
-    def _start_breathing_exercise(
-        self, phone_number: str, exercise_id: int, patient: Patient
-    ) -> Dict:
-        """Iniciar exercício de respiração"""
-        try:
-            exercise = BreathingExercise.query.get(exercise_id)
-            if not exercise:
-                self.whatsapp_service.send_text_message(
-                    phone_number, "❌ Exercício de respiração não encontrado."
-                )
-                return {"status": "error", "message": "Exercise not found"}
-
-            message = f"""🫁 *{exercise.name}*
-
-{exercise.description}
-
-📝 *Instruções:*
-{exercise.instructions}
-
-⏱️ *Duração:* {exercise.duration_minutes} minutos
-
-Vamos começar? Encontre um local confortável e siga as instruções."""
-
-            buttons = [
-                {
-                    "id": f"breathing_start_audio_{exercise_id}",
-                    "title": "🎵 Iniciar com áudio",
-                },
-                {
-                    "id": f"breathing_start_text_{exercise_id}",
-                    "title": "📝 Apenas instruções",
-                },
-                {"id": "breathing_cancel", "title": "❌ Cancelar"},
-            ]
-
-            self.whatsapp_service.send_interactive_message(
-                phone_number, "Exercício de Respiração", message, buttons
-            )
-
-            return {"status": "sent", "action": "breathing_exercise_started"}
-
-        except Exception as e:
-            self.logger.error(f"Erro ao iniciar exercício de respiração: {e}")
-            return {"status": "error", "message": str(e)}
-
-    def _handle_uetg_slot_callback(
-        self, phone_number: str, response_id: str, patient
-    ) -> Dict:
-        """Processar clique nos botões de horário u-ETG"""
-        try:
-            if not response_id or not response_id.strip():
-                self.logger.error("Response ID inválido para u-ETG")
-                return {"status": "error", "action": "invalid_response_id"}
-
-            if not patient or not hasattr(patient, "name"):
-                self.logger.error("Paciente inválido para u-ETG")
-                return {"status": "error", "action": "invalid_patient"}
-
-            from src.jobs.uetg_scheduler import process_button_click
-
-            # Processar o clique do botão
-            patient_name = (patient.name or "Paciente").strip()
-            phone_clean = (phone_number or "").strip()
-
-            self.logger.info(
-                f"Processando slot u-ETG: {response_id} para {patient_name}"
-            )
-
-            success = process_button_click(response_id, phone_clean, patient_name)
-
-            if success:
-                self.logger.info(
-                    f"Slot u-ETG confirmado: {response_id} por {patient_name}"
-                )
-                return {"status": "processed", "action": "uetg_slot_confirmed"}
-            else:
-                self.logger.error(f"Erro ao confirmar slot u-ETG: {response_id}")
-                self.whatsapp_service.send_text_message(
-                    phone_number,
-                    "❌ Erro ao confirmar horário. Tente novamente ou entre em contato.",
-                )
-                return {"status": "error", "action": "uetg_slot_error"}
-
-        except Exception as e:
-            self.logger.error(f"Erro ao processar confirmação u-ETG: {e}")
-            self.whatsapp_service.send_text_message(
-                phone_number, "❌ Erro interno. Entre em contato com o suporte."
-            )
-            return {"status": "error", "message": str(e)}
-
-    def notify_admin(self, message: str) -> Dict:
-        """Enviar notificação para o administrador"""
-        if not self.admin_phone:
-            self.logger.warning("Admin phone não configurado")
-            return {"status": "error", "message": "Admin phone not configured"}
-
-        try:
-            # Suportar múltiplos admins separados por vírgula
-            admin_phones = [phone.strip() for phone in self.admin_phone.split(",")]
-            for admin_phone in admin_phones:
-                self.whatsapp_service.send_text_message(admin_phone, message)
-
-            return {"status": "sent", "action": "admin_notified"}
-
-        except Exception as e:
-            self.logger.error(f"Erro ao notificar admin: {e}")
-            return {"status": "error", "message": str(e)}
