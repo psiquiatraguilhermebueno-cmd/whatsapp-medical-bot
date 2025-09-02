@@ -55,7 +55,34 @@ class WhatsAppMessageHandler:
             }
 
             phone_number = user_info["phone_number"]
+            if message_data.get("type") == "interactive":
+                try:
+                    response_id, _title = self._normalize_interactive(message_data.get("interactive") or {})
+                except Exception:
+                    response_id = ""
 
+                slot_ids = {"slot_0730", "slot_1215", "slot_1900"}
+                slot_titles = {"07:30": "slot_0730", "12:15": "slot_1215", "19:00": "slot_1900"}
+                normalized_id = slot_titles.get(response_id, response_id)
+
+                if normalized_id in slot_ids or str(normalized_id).startswith("slot_"):
+                    patient = self._get_or_create_patient(user_info)
+                    return self._handle_uetg_slot_callback(phone_number, normalized_id, patient)
+            # BYPASS GLOBAL u-ETG: processa slot_* antes de qualquer guard/roteamento
+            if message_data.get("type") == "interactive":
+                try:
+                    response_id, _title = self._normalize_interactive(message_data.get("interactive") or {})
+                except Exception:
+                    response_id = ""
+
+                # Mapas de slots
+                slot_ids    = {"slot_0730", "slot_1215", "slot_1900"}
+                slot_titles = {"07:30": "slot_0730", "12:15": "slot_1215", "19:00": "slot_1900"}
+                normalized_id = slot_titles.get(response_id, response_id)
+
+                if normalized_id in slot_ids or str(normalized_id).startswith("slot_"):
+                    patient = self._get_or_create_patient(user_info)
+                    return self._handle_uetg_slot_callback(phone_number, normalized_id, patient)
             # Verificar se é mensagem de texto
             if message_data.get("type") == "text":
                 return self._handle_text_message(
