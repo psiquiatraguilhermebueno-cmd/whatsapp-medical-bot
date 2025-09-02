@@ -47,27 +47,15 @@ class WhatsAppMessageHandler:
                 self.whatsapp_service.mark_message_as_read(message_data["message_id"])
 
             # Extrair informações do usuário
+            # === user_info normalizado + bypass global u-ETG ===
             user_info = {
-                "phone_number": message_data.get("from"),
-                "name": message_data.get("contact_name", "Usuário"),
+                "phone_number": _clean_phone(message_data.get("from")),
+                "name": message_data.get("contact_name") or "Usuário",
                 "message_id": message_data.get("message_id"),
                 "timestamp": message_data.get("timestamp"),
             }
+            phone_number = _clean_phone(user_info.get("phone_number"))
 
-            phone_number = user_info["phone_number"]
-            if message_data.get("type") == "interactive":
-                try:
-                    response_id, _title = self._normalize_interactive(message_data.get("interactive") or {})
-                except Exception:
-                    response_id = ""
-
-                slot_ids = {"slot_0730", "slot_1215", "slot_1900"}
-                slot_titles = {"07:30": "slot_0730", "12:15": "slot_1215", "19:00": "slot_1900"}
-                normalized_id = slot_titles.get(response_id, response_id)
-
-                if normalized_id in slot_ids or str(normalized_id).startswith("slot_"):
-                    patient = self._get_or_create_patient(user_info)
-                    return self._handle_uetg_slot_callback(phone_number, normalized_id, patient)
             # BYPASS GLOBAL u-ETG: processa slot_* antes de qualquer guard/roteamento
             if message_data.get("type") == "interactive":
                 try:
@@ -75,14 +63,31 @@ class WhatsAppMessageHandler:
                 except Exception:
                     response_id = ""
 
-                # Mapas de slots
+                # Mapas de slots + mapeamento canônico
                 slot_ids    = {"slot_0730", "slot_1215", "slot_1900"}
                 slot_titles = {"07:30": "slot_0730", "12:15": "slot_1215", "19:00": "slot_1900"}
                 normalized_id = slot_titles.get(response_id, response_id)
 
                 if normalized_id in slot_ids or str(normalized_id).startswith("slot_"):
-                    patient = self._get_or_create_patient(user_info)
+                    # autocadastro idempotente
+                    patient = self._get_or_create_patient({"phone_number": phone_number, "name": user_info.get("name")})
+                    try:
+                        if patient and getattr(patient, "is_active", None) is False:
+                            patient.is_active = True
+                            db.session.commit()
+                    except Exception:
+                        pass
+
+                    # log opcional (ajuda no diagnóstico)
+                    try:
+                        self.logger.warning("PATH|BYPASS_GLOBAL|from=%s|slot=%s", phone_number, normalized_id)
+                    except Exception:
+                        pass
+
                     return self._handle_uetg_slot_callback(phone_number, normalized_id, patient)
+
+
+
             # Verificar se é mensagem de texto
             if message_data.get("type") == "text":
                 return self._handle_text_message(
