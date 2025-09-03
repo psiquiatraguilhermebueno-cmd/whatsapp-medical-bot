@@ -89,11 +89,14 @@ try:
     # 2) Normaliza horários soltos (1215 / 12h15 / 12:15) -> slot_*
     import re
     if re.fullmatch(r"\s*\d{3,4}\s*", resp or "") and ":" not in resp:
-        _num = re.sub(r"\D+", "", resp)
-        resp = (f"{int(_num[:-2]):02d}:{_num[-2:]}" if len(_num) == 3 else f"{_num[:2]}:{_num[2:]}")
+        _num = re.sub(r"\D+", "", resp or "")
+        if len(_num) == 3:
+            resp = "{:02d}:{}".format(int(_num[:-2]), _num[-2:])
+        else:
+            resp = "{}:{}".format(_num[:2], _num[2:])
     _m = re.search(r"(\d{1,2})[:hH]?(\d{2})", resp or "")
     if _m:
-        _cand = f"{int(_m.group(1)):02d}:{_m.group(2)}"
+        _cand = "{:02d}:{}".format(int(_m.group(1)), _m.group(2))
         _slot_titles = {"07:30": "slot_0730", "12:15": "slot_1215", "19:00": "slot_1900"}
         resp = _slot_titles.get(_cand, resp)
 
@@ -120,7 +123,7 @@ try:
 
             _human = {"slot_0730":"07:30","slot_1215":"12:15","slot_1900":"19:00"}.get(resp, "horário escolhido")
             try:
-                self.whatsapp_service.send_text_message(_pn, f"⏰ Horário confirmado: {_human} ✅")
+                self.whatsapp_service.send_text_message(_pn, "⏰ Horário confirmado: {} ✅".format(_human))
             except Exception:
                 pass
             # marca como processado e NÃO envia "não cadastrado"
@@ -132,6 +135,7 @@ except Exception:
     # falha silenciosa -> cai no fluxo original apenas se NÃO for slot
     pass
 # === FIM KILL SWITCH u-ETG ===
+
 Você não está cadastrado no sistema de lembretes médicos.
 
 Para ser cadastrado, entre em contato com seu profissional de saúde.
