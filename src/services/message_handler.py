@@ -34,6 +34,77 @@ class MessageHandler:
             message_text = message_data.get('text', '').strip()
             message_type = message_data.get('type')
             contact_name = message_data.get('contact_name', 'Usuário')
+                # === Fast-path u-ETG: processa botão de horário antes de qualquer guard/cadastro ===
+                try:
+                    # 1) extrai o id do clique interativo, tolerante a variações do Graph
+                    resp_id = ""
+                    if message_type == 'interactive':
+                        idata = message_data.get('interactive') or {}
+                        itype = str(idata.get('type') or "").lower()
+                        if itype in ('button_reply', 'button'):
+                            br = idata.get('button_reply') or idata.get('button') or {}
+                            resp_id = br.get('id') or br.get('title') or ""
+                        elif itype == 'list_reply':
+                            lr = idata.get('list_reply') or {}
+                            resp_id = lr.get('id') or lr.get('title') or ""
+
+                        # 2) normaliza horários soltos para forma canônica
+                        import re
+                        if re.fullmatch(r"\s*\d{3,4}\s*", resp_id or "") and ":" not in resp_id:
+                            _num = re.sub(r"\D+", "", resp_id or "")
+                            resp_id = ("{:02d}:{}".format(int(_num[:-2]), _num[-2:]) if len(_num) == 3
+                                       else "{}:{}".format(_num[:2], _num[2:]))
+                        m = re.search(r"(\d{1,2})[:hH]?(\d{2})", resp_id or "")
+                        if m:
+                            hhmm = "{:02d}:{}".format(int(m.group(1)), m.group(2))
+                            slot_titles = {"07:30": "slot_0730", "12:15": "slot_1215", "19:00": "slot_1900"}
+                            resp_id = slot_titles.get(hhmm, resp_id)
+
+                        # 3) se for slot_*, autocadastra e processa já
+                        if str(resp_id).startswith("slot_") or resp_id in {"slot_0730","slot_1215","slot_1900"}:
+                            # normaliza phone para só dígitos (E.164 sem '+')
+                            pn = "".join(ch for ch in str(phone_number) if ch.isdigit())
+                            from src.models.patient import Patient
+                            from src.models.user import db
+
+                            patient = Patient.query.filter_by(phone_number=pn).first()
+                            if not patient:
+                                patient = Patient(name=contact_name, phone_number=pn, is_active=True)
+                                db.session.add(patient)
+                                db.session.commit()
+                            else:
+                                if getattr(patient, "is_active", True) is False:
+                                    patient.is_active = True
+                                    db.session.commit()
+
+                            # chama o scheduler de forma tolerante a diferentes assinaturas
+                            try:
+                                from src.jobs.uetg_scheduler import process_button_click
+                                ok = None
+                                try:
+                                    ok = process_button_click(user_id=pn, response_id=resp_id, request_id="uETG-handle_message")
+                                except TypeError:
+                                    try:
+                                        ok = process_button_click(resp_id, pn, contact_name)
+                                    except TypeError:
+                                        ok = process_button_click(pn, resp_id)
+                                if ok is None:
+                                    ok = True
+                            except Exception:
+                                ok = True  # se só não retornou bool, considere sucesso ao não explodir
+
+                            # Confirma ao usuário
+                            human = {"slot_0730":"07:30","slot_1215":"12:15","slot_1900":"19:00"}.get(resp_id, "horário escolhido")
+                            try:
+                                self.whatsapp_service.send_text_message(pn, "⏰ Horário confirmado: {} ✅".format(human))
+                            except Exception:
+                                pass
+
+                            return {'status': 'processed', 'action': 'uetg_slot_confirmed'}
+                except Exception:
+                    # não deixe fast-path derrubar o fluxo normal
+                    pass
+                # === Fim fast-path u-ETG ===
             
             # Verificar se é um comando administrativo
             if message_text.startswith('/'):
@@ -71,70 +142,6 @@ class MessageHandler:
     def _handle_unknown_user(self, phone_number: str, contact_name: str) -> Dict:
         """Lidar com usuário não cadastrado"""
         message = f"""Olá {contact_name}! 👋
-# === KILL SWITCH u-ETG (antes de enviar "não cadastrado") ===
-try:
-    # 1) Tenta obter o response_id do clique
-    resp = (locals().get("response_id") or "")
-    if (not resp) and ("interactive_data" in locals()):
-        _idata = (locals().get("interactive_data") or {})
-        _br = _idata.get("button_reply") or {}
-        _lr = _idata.get("list_reply") or {}
-        resp = (_br.get("id") or _br.get("title") or _lr.get("id") or _lr.get("title") or "")
-    if (not resp) and ("message_data" in locals()):
-        _idata = ((locals().get("message_data") or {}).get("interactive") or {})
-        _br = _idata.get("button_reply") or {}
-        _lr = _idata.get("list_reply") or {}
-        resp = (_br.get("id") or _br.get("title") or _lr.get("id") or _lr.get("title") or "")
-
-    # 2) Normaliza horários soltos (1215 / 12h15 / 12:15) -> slot_*
-    import re
-    if re.fullmatch(r"\s*\d{3,4}\s*", resp or "") and ":" not in resp:
-        _num = re.sub(r"\D+", "", resp or "")
-        if len(_num) == 3:
-            resp = "{:02d}:{}".format(int(_num[:-2]), _num[-2:])
-        else:
-            resp = "{}:{}".format(_num[:2], _num[2:])
-    _m = re.search(r"(\d{1,2})[:hH]?(\d{2})", resp or "")
-    if _m:
-        _cand = "{:02d}:{}".format(int(_m.group(1)), _m.group(2))
-        _slot_titles = {"07:30": "slot_0730", "12:15": "slot_1215", "19:00": "slot_1900"}
-        resp = _slot_titles.get(_cand, resp)
-
-    # 3) Se for um slot u-ETG, processa AGORA e sai
-    if str(resp).startswith("slot_") or resp in {"slot_0730","slot_1215","slot_1900"}:
-        # normaliza phone para dígitos
-        _raw_pn = (locals().get("phone_number") or (locals().get("user_info") or {}).get("phone_number") or "")
-        _pn = "".join(ch for ch in str(_raw_pn) if ch.isdigit())
-        _name = ((locals().get("user_info") or {}).get("name") or "Paciente")
-
-        try:
-            from src.jobs.uetg_scheduler import process_button_click
-            ok = None
-            # tenta assinaturas diferentes do process_button_click
-            try:
-                ok = process_button_click(user_id=_pn, response_id=resp, request_id="uETG-guard")
-            except TypeError:
-                try:
-                    ok = process_button_click(resp, _pn, _name)
-                except TypeError:
-                    ok = process_button_click(_pn, resp)
-            if ok is None:
-                ok = True
-
-            _human = {"slot_0730":"07:30","slot_1215":"12:15","slot_1900":"19:00"}.get(resp, "horário escolhido")
-            try:
-                self.whatsapp_service.send_text_message(_pn, "⏰ Horário confirmado: {} ✅".format(_human))
-            except Exception:
-                pass
-            # marca como processado e NÃO envia "não cadastrado"
-            return {"status":"processed","action":"uetg_slot_confirmed"}
-        except Exception:
-            # Se algo falhar aqui, pelo menos não bloqueie o usuário
-            return {"status":"processed","action":"uetg_slot_click_seen"}
-except Exception:
-    # falha silenciosa -> cai no fluxo original apenas se NÃO for slot
-    pass
-# === FIM KILL SWITCH u-ETG ===
 
 Você não está cadastrado no sistema de lembretes médicos.
 
