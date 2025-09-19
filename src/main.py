@@ -1,8 +1,8 @@
 import os
 import json
 import requests
-from flask import Flask, jsonify, request
 from datetime import datetime
+from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
@@ -34,15 +34,21 @@ RESPONSE_MEANINGS = {
 }
 
 def send_whatsapp_message(phone_number, message_text):
-    """Envia mensagem de texto via WhatsApp"""
+    """Envia mensagem de texto via WhatsApp com logs detalhados"""
+    print(f"🔄 Attempting to send message to {phone_number}")
+    print(f"📝 Message length: {len(message_text)} characters")
+    
     if not WHATSAPP_ACCESS_TOKEN or not WHATSAPP_PHONE_NUMBER_ID:
         print("❌ WhatsApp credentials not configured")
+        print(f"Token exists: {bool(WHATSAPP_ACCESS_TOKEN)}")
+        print(f"Phone ID exists: {bool(WHATSAPP_PHONE_NUMBER_ID)}")
         return False
     
     url = f"https://graph.facebook.com/v18.0/{WHATSAPP_PHONE_NUMBER_ID}/messages"
+    print(f"🌐 API URL: {url}")
     
     headers = {
-        'Authorization': f'Bearer {WHATSAPP_ACCESS_TOKEN}',
+        'Authorization': f'Bearer {WHATSAPP_ACCESS_TOKEN[:20]}...',  # Log partial token
         'Content-Type': 'application/json'
     }
     
@@ -53,19 +59,43 @@ def send_whatsapp_message(phone_number, message_text):
         "text": {"body": message_text}
     }
     
-    try:
-        response = requests.post(url, headers=headers, json=data, timeout=30)
-        if response.status_code == 200:
-            result = response.json()
-            message_id = result.get('messages', [{}])[0].get('id', 'unknown')
-            print(f"✅ Message sent to {phone_number} - ID: {message_id}")
-            return True
-        else:
-            print(f"❌ Error sending message: {response.status_code} - {response.text}")
-            return False
-    except Exception as e:
-        print(f"💥 Exception sending message: {e}")
-        return False
+    print(f"📤 Sending data: {json.dumps(data, indent=2)}")
+    
+    # Tentar enviar até 3 vezes
+    for attempt in range(3):
+        try:
+            print(f"🔄 Attempt {attempt + 1}/3")
+            response = requests.post(url, headers=headers, json=data, timeout=30)
+            
+            print(f"📊 Response status: {response.status_code}")
+            print(f"📝 Response headers: {dict(response.headers)}")
+            print(f"📄 Response body: {response.text}")
+            
+            if response.status_code == 200:
+                result = response.json()
+                message_id = result.get('messages', [{}])[0].get('id', 'unknown')
+                print(f"✅ Message sent successfully to {phone_number} - ID: {message_id}")
+                return True
+            else:
+                print(f"❌ Error sending message: {response.status_code}")
+                print(f"Error details: {response.text}")
+                
+                # Se for erro 400, não tentar novamente
+                if response.status_code == 400:
+                    break
+                    
+        except Exception as e:
+            print(f"💥 Exception on attempt {attempt + 1}: {e}")
+            if attempt == 2:  # Última tentativa
+                return False
+            
+        # Aguardar antes da próxima tentativa
+        if attempt < 2:
+            import time
+            time.sleep(2)
+    
+    print(f"❌ Failed to send message after 3 attempts")
+    return False
 
 def send_whatsapp_buttons(phone_number, message_text, buttons):
     """Envia mensagem com botões via WhatsApp"""
