@@ -1,15 +1,15 @@
 import os
 import json
 import requests
+from flask import Flask, jsonify, request
 from datetime import datetime
-from flask import Flask, request, jsonify, render_template, send_from_directory
 
 app = Flask(__name__)
 
-# Configurações do WhatsApp (fallback para valores diretos se env não funcionar)
-WHATSAPP_ACCESS_TOKEN = os.getenv('WHATSAPP_ACCESS_TOKEN') or "EAANTZCXB0csgBPft9y6ZBIdeTVM5PVLr2ZBZAlTGd49ezcAklZCF4DDZC6r6NQ4nrDREkNnC6iEebI7YxciceIMF9BD9Cwp8OqVpBYxeZB2gAZADsVQZCsDbDZAlaPZC3iByj0ZAn2eaSrmjPaQPqZBX6UJZAK6Hd8MuXGoKVrLFPooE7so4G1w2wYNaxJYn1SgQ6RnwZDZD"
-WHATSAPP_PHONE_NUMBER_ID = os.getenv('WHATSAPP_PHONE_NUMBER_ID') or "797803706754193"
-WHATSAPP_WEBHOOK_VERIFY_TOKEN = os.getenv('WHATSAPP_WEBHOOK_VERIFY_TOKEN') or "verify_123"
+# Configurações WhatsApp
+WHATSAPP_ACCESS_TOKEN = os.getenv('WHATSAPP_ACCESS_TOKEN')
+WHATSAPP_PHONE_NUMBER_ID = os.getenv('WHATSAPP_PHONE_NUMBER_ID')
+WHATSAPP_WEBHOOK_VERIFY_TOKEN = os.getenv('WHATSAPP_WEBHOOK_VERIFY_TOKEN')
 
 # Estado dos questionários (em produção seria banco de dados)
 questionnaire_states = {}
@@ -34,23 +34,15 @@ RESPONSE_MEANINGS = {
 }
 
 def send_whatsapp_message(phone_number, message_text):
-    """Envia mensagem de texto via WhatsApp com credenciais hardcoded"""
-    print(f"🔄 Attempting to send message to {phone_number}")
-    print(f"📝 Message length: {len(message_text)} characters")
-    
-    # Credenciais hardcoded para garantir funcionamento
-    token = "EAANTZCXB0csgBPft9y6ZBIdeTVM5PVLr2ZBZAlTGd49ezcAklZCF4DDZC6r6NQ4nrDREkNnC6iEebI7YxciceIMF9BD9Cwp8OqVpBYxeZB2gAZADsVQZCsDbDZAlaPZC3iByj0ZAn2eaSrmjPaQPqZBX6UJZAK6Hd8MuXGoKVrLFPooE7so4G1w2wYNaxJYn1SgQ6RnwZDZD"
-    phone_id = "797803706754193"
-    
-    if not token or not phone_id:
+    """Envia mensagem de texto via WhatsApp"""
+    if not WHATSAPP_ACCESS_TOKEN or not WHATSAPP_PHONE_NUMBER_ID:
         print("❌ WhatsApp credentials not configured")
         return False
     
-    url = f"https://graph.facebook.com/v18.0/{phone_id}/messages"
-    print(f"🌐 API URL: {url}")
+    url = f"https://graph.facebook.com/v18.0/{WHATSAPP_PHONE_NUMBER_ID}/messages"
     
     headers = {
-        'Authorization': f'Bearer {token}',
+        'Authorization': f'Bearer {WHATSAPP_ACCESS_TOKEN}',
         'Content-Type': 'application/json'
     }
     
@@ -61,42 +53,19 @@ def send_whatsapp_message(phone_number, message_text):
         "text": {"body": message_text}
     }
     
-    print(f"📤 Sending data: {json.dumps(data, indent=2)}")
-    
-    # Tentar enviar até 3 vezes
-    for attempt in range(3):
-        try:
-            print(f"🔄 Attempt {attempt + 1}/3")
-            response = requests.post(url, headers=headers, json=data, timeout=30)
-            
-            print(f"📊 Response status: {response.status_code}")
-            print(f"📄 Response body: {response.text}")
-            
-            if response.status_code == 200:
-                result = response.json()
-                message_id = result.get('messages', [{}])[0].get('id', 'unknown')
-                print(f"✅ Message sent successfully to {phone_number} - ID: {message_id}")
-                return True
-            else:
-                print(f"❌ Error sending message: {response.status_code}")
-                print(f"Error details: {response.text}")
-                
-                # Se for erro 400, não tentar novamente
-                if response.status_code == 400:
-                    break
-                    
-        except Exception as e:
-            print(f"💥 Exception on attempt {attempt + 1}: {e}")
-            if attempt == 2:  # Última tentativa
-                return False
-            
-        # Aguardar antes da próxima tentativa
-        if attempt < 2:
-            import time
-            time.sleep(2)
-    
-    print(f"❌ Failed to send message after 3 attempts")
-    return False
+    try:
+        response = requests.post(url, headers=headers, json=data, timeout=30)
+        if response.status_code == 200:
+            result = response.json()
+            message_id = result.get('messages', [{}])[0].get('id', 'unknown')
+            print(f"✅ Message sent to {phone_number} - ID: {message_id}")
+            return True
+        else:
+            print(f"❌ Error sending message: {response.status_code} - {response.text}")
+            return False
+    except Exception as e:
+        print(f"💥 Exception sending message: {e}")
+        return False
 
 def send_whatsapp_buttons(phone_number, message_text, buttons):
     """Envia mensagem com botões via WhatsApp"""
@@ -174,16 +143,16 @@ def start_gad7_questionnaire(phone_number):
         'started_at': datetime.now().isoformat()
     }
     
-    print(f"🚀 Starting GAD-7 for {phone_number}")
-    
-    # Enviar instruções e primeira pergunta juntas
-    complete_message = """📋 *INSTRUÇÕES GAD-7*
+    # Enviar instruções e primeira pergunta
+    instructions = """📋 *INSTRUÇÕES GAD-7*
 
 Para cada pergunta, responda APENAS O NÚMERO:
 • 0 = Nenhuma vez
 • 1 = Vários dias  
 • 2 = Mais da metade dos dias
 • 3 = Quase todos os dias
+
+Exemplo: Se a resposta for "Vários dias", digite apenas: 1
 
 Digite *cancelar* a qualquer momento para interromper.
 
@@ -197,11 +166,7 @@ Nas últimas 2 semanas, com que frequência você percebeu-se incomodado por:
 
 Responda apenas o número: 0, 1, 2 ou 3"""
     
-    print(f"📤 Sending complete message to {phone_number}")
-    result = send_whatsapp_message(phone_number, complete_message)
-    print(f"📊 Send result: {result}")
-    
-    return result
+    return send_whatsapp_message(phone_number, instructions)
 
 def cancel_questionnaire(phone_number):
     """Cancela questionário em andamento"""
@@ -239,8 +204,6 @@ def process_gad7_response(phone_number, response_text):
     # Próxima pergunta ou resultado final
     state['current_question'] += 1
     
-    print(f"🔄 Updated state: question {state['current_question']}, total questions: {len(GAD7_QUESTIONS)}")
-    
     if state['current_question'] < len(GAD7_QUESTIONS):
         # Próxima pergunta
         next_q = state['current_question']
@@ -256,13 +219,7 @@ Responda apenas o número: 0, 1, 2 ou 3
 (Digite *cancelar* para interromper)"""
         
         message = feedback + next_question
-        print(f"📤 Sending question {next_q + 1}/7 to {phone_number}")
-        print(f"📝 Message content: {message[:100]}...")
-        
-        # Enviar mensagem e verificar resultado
-        result = send_whatsapp_message(phone_number, message)
-        print(f"📊 Message send result: {result}")
-        return result
+        print(f"📤 Sending question {next_q + 1}/7")
     else:
         # Calcular resultado final
         total_score = sum(state['responses'])
@@ -312,82 +269,6 @@ Digite *gad7* para fazer um novo questionário."""
     
     return send_whatsapp_message(phone_number, message)
 
-
-# VERSÃO DE EMERGÊNCIA - GAD-7 VIA TEXTO SIMPLES
-
-def emergency_gad7_handler(phone_number, text_body):
-    """Handler de emergência para GAD-7 via texto simples"""
-    text_lower = text_body.lower().strip()
-    
-    # Comandos especiais
-    if text_lower == 'gad7':
-        # Enviar todas as perguntas de uma vez
-        all_questions = """📋 *QUESTIONÁRIO GAD-7 COMPLETO*
-
-Responda TODAS as 7 perguntas abaixo com números de 0 a 3:
-• 0 = Nenhuma vez
-• 1 = Vários dias  
-• 2 = Mais da metade dos dias
-• 3 = Quase todos os dias
-
-*FORMATO DE RESPOSTA:* Digite os 7 números separados por espaço
-Exemplo: 1 2 0 3 1 2 1
-
-*PERGUNTAS:*
-
-1. Sentir-se nervoso, ansioso ou muito tenso?
-2. Não conseguir parar ou controlar as preocupações?
-3. Preocupar-se muito com diversas coisas?
-4. Ter dificuldade para relaxar?
-5. Ficar tão agitado que se torna difícil permanecer parado?
-6. Ficar facilmente aborrecido ou irritado?
-7. Sentir medo como se algo terrível fosse acontecer?
-
-*Responda com 7 números separados por espaço.*"""
-        
-        return send_whatsapp_message(phone_number, all_questions)
-    
-    # Verificar se é resposta do GAD-7 (7 números)
-    if text_body.strip() and all(c.isdigit() or c.isspace() for c in text_body.strip()):
-        numbers = text_body.strip().split()
-        
-        if len(numbers) == 7 and all(n in ['0', '1', '2', '3'] for n in numbers):
-            # Processar resposta completa
-            total_score = sum(int(n) for n in numbers)
-            
-            # Categorizar resultado
-            if total_score <= 4:
-                category = "Ansiedade mínima"
-                interpretation = "Seus sintomas de ansiedade estão em um nível muito baixo."
-            elif total_score <= 9:
-                category = "Ansiedade leve"
-                interpretation = "Você apresenta sintomas leves de ansiedade."
-            elif total_score <= 14:
-                category = "Ansiedade moderada"
-                interpretation = "Você apresenta sintomas moderados de ansiedade. Considere conversar com um profissional."
-            else:
-                category = "Ansiedade severa"
-                interpretation = "Você apresenta sintomas severos de ansiedade. É recomendado buscar ajuda profissional."
-            
-            result_message = f"""📊 *RESULTADO GAD-7*
-
-*Suas respostas:* {' '.join(numbers)}
-*Pontuação total:* {total_score}/21
-*Categoria:* {category}
-
-*Interpretação:* {interpretation}
-
-*Data:* {datetime.now().strftime('%d/%m/%Y às %H:%M')}
-
-Obrigado por responder o questionário! 🙏
-
-Digite *gad7* para fazer um novo questionário."""
-            
-            return send_whatsapp_message(phone_number, result_message)
-    
-    return False
-
-
 def process_text_message(phone_number, text_body):
     """Processa mensagens de texto"""
     text_lower = text_body.lower().strip()
@@ -399,14 +280,10 @@ def process_text_message(phone_number, text_body):
         print(f"⏹️ Cancel command received: {text_lower}")
         return cancel_questionnaire(phone_number)
     
-    # Comandos específicos
-    # Tentar handler de emergência primeiro
-    if emergency_gad7_handler(phone_number, text_body):
-        return True
-    
-    if text_lower == 'gad7':
-        print("📋 GAD-7 questionnaire requested - STARTING DIRECTLY")
-        return start_gad7_questionnaire(phone_number)
+    # Comando para iniciar GAD-7
+    elif text_lower == 'gad7':
+        print("🚀 Starting GAD-7 invitation")
+        return send_gad7_invitation(phone_number)
     
     # Se há questionário ativo, processar resposta
     elif phone_number in questionnaire_states:
@@ -558,89 +435,3 @@ if __name__ == "__main__":
     print(f"🧹 Clear states: https://web-production-4fc41.up.railway.app/api/debug/clear")
     
     app.run(host="0.0.0.0", port=port, debug=False)
-
-@app.route("/api/test/send-direct/<phone_number>", methods=['POST'])
-def test_send_direct(phone_number):
-    """Endpoint para testar envio direto de mensagem"""
-    try:
-        data = request.get_json() or {}
-        message = data.get('message', 'Teste de mensagem direta')
-        
-        print(f"🧪 TEST ENDPOINT: Sending message to {phone_number}")
-        print(f"📝 Message: {message}")
-        
-        result = send_whatsapp_message(phone_number, message)
-        
-        return jsonify({
-            "status": "success" if result else "failed",
-            "message": f"Message {'sent' if result else 'failed'} to {phone_number}",
-            "phone": phone_number,
-            "text": message
-        })
-        
-    except Exception as e:
-        print(f"💥 Error in test endpoint: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-
-
-@app.route("/api/admin/configure", methods=['POST'])
-def configure_environment():
-    """Endpoint para configurar variáveis de ambiente"""
-    try:
-        # Configurar variáveis globalmente
-        global WHATSAPP_ACCESS_TOKEN, WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_WEBHOOK_VERIFY_TOKEN
-        
-        WHATSAPP_ACCESS_TOKEN = "EAANTZCXB0csgBPft9y6ZBIdeTVM5PVLr2ZBZAlTGd49ezcAklZCF4DDZC6r6NQ4nrDREkNnC6iEebI7YxciceIMF9BD9Cwp8OqVpBYxeZB2gAZADsVQZCsDbDZAlaPZC3iByj0ZAn2eaSrmjPaQPqZBX6UJZAK6Hd8MuXGoKVrLFPooE7so4G1w2wYNaxJYn1SgQ6RnwZDZD"
-        WHATSAPP_PHONE_NUMBER_ID = "797803706754193"
-        WHATSAPP_WEBHOOK_VERIFY_TOKEN = "verify_123"
-        
-        print(f"🔧 Configured TOKEN: {WHATSAPP_ACCESS_TOKEN[:20]}...")
-        print(f"🔧 Configured PHONE_ID: {WHATSAPP_PHONE_NUMBER_ID}")
-        
-        return jsonify({
-            "status": "success",
-            "message": "Environment variables configured",
-            "token_configured": bool(WHATSAPP_ACCESS_TOKEN),
-            "phone_id_configured": bool(WHATSAPP_PHONE_NUMBER_ID)
-        })
-        
-    except Exception as e:
-        print(f"💥 Error configuring: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-
-@app.route("/questionario/gad7/<token>")
-def gad7_questionnaire(token):
-    """Página do questionário GAD-7"""
-    # Aqui você validaria o token e carregaria dados do paciente
-    return render_template('gad7.html')
-
-@app.route("/static/<path:filename>")
-def static_files(filename):
-    """Servir arquivos estáticos"""
-    return send_from_directory('static', filename)
-
-@app.route("/api/save-gad7", methods=['POST'])
-def save_gad7_result():
-    """Salvar resultado do GAD-7"""
-    try:
-        data = request.get_json()
-        
-        # Aqui você salvaria no banco de dados
-        print(f"📊 GAD-7 Result received:")
-        print(f"Patient: {data['patient']['firstName']} {data['patient']['lastName']}")
-        print(f"Score: {data['totalScore']}/21 - {data['category']}")
-        print(f"Answers: {data['answers']}")
-        
-        return jsonify({
-            "status": "success",
-            "message": "Resultado salvo com sucesso"
-        })
-        
-    except Exception as e:
-        print(f"💥 Error saving GAD-7 result: {e}")
-        return jsonify({
-            "status": "error", 
-            "message": str(e)
-        }), 500

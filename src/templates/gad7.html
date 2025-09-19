@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Questionário GAD-7 - Dr. Guilherme Bueno</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            max-width: 500px;
+            width: 100%;
+            overflow: hidden;
+            animation: slideUp 0.6s ease-out;
+        }
+
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .header {
+            background: linear-gradient(135deg, #00BCD4 0%, #FF9800 100%);
+            padding: 30px 20px;
+            text-align: center;
+            color: white;
+            position: relative;
+        }
+
+        .logo {
+            width: 60px;
+            height: 60px;
+            margin: 0 auto 15px;
+            background: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+        }
+
+        .logo img {
+            width: 45px;
+            height: 45px;
+            object-fit: contain;
+        }
+
+        .header h1 {
+            font-size: 24px;
+            font-weight: 300;
+            margin-bottom: 5px;
+        }
+
+        .header .subtitle {
+            font-size: 14px;
+            opacity: 0.9;
+            font-weight: 300;
+        }
+
+        .doctor-info {
+            position: absolute;
+            bottom: 10px;
+            right: 15px;
+            font-size: 10px;
+            opacity: 0.7;
+        }
+
+        .content {
+            padding: 40px 30px;
+        }
+
+        .progress-bar {
+            background: #f0f0f0;
+            height: 6px;
+            border-radius: 3px;
+            margin-bottom: 30px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            background: linear-gradient(90deg, #00BCD4, #FF9800);
+            height: 100%;
+            border-radius: 3px;
+            transition: width 0.3s ease;
+        }
+
+        .progress-text {
+            text-align: center;
+            color: #666;
+            font-size: 12px;
+            margin-bottom: 20px;
+        }
+
+        .question-container {
+            display: none;
+            animation: fadeIn 0.5s ease-in;
+        }
+
+        .question-container.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateX(20px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+
+        .question {
+            font-size: 18px;
+            color: #333;
+            margin-bottom: 25px;
+            line-height: 1.5;
+            text-align: center;
+        }
+
+        .question-number {
+            color: #00BCD4;
+            font-weight: 600;
+            font-size: 14px;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+
+        .options {
+            display: grid;
+            gap: 12px;
+        }
+
+        .option {
+            background: #f8f9fa;
+            border: 2px solid #e9ecef;
+            border-radius: 12px;
+            padding: 15px 20px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-align: center;
+            font-size: 16px;
+            color: #495057;
+        }
+
+        .option:hover {
+            border-color: #00BCD4;
+            background: #e0f7fa;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 188, 212, 0.2);
+        }
+
+        .option.selected {
+            background: linear-gradient(135deg, #00BCD4, #FF9800);
+            color: white;
+            border-color: #00BCD4;
+            box-shadow: 0 4px 15px rgba(0, 188, 212, 0.3);
+        }
+
+        .navigation {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 30px;
+        }
+
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            min-width: 100px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #00BCD4, #FF9800);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 188, 212, 0.3);
+        }
+
+        .btn-secondary {
+            background: #f8f9fa;
+            color: #6c757d;
+            border: 1px solid #dee2e6;
+        }
+
+        .btn-secondary:hover {
+            background: #e9ecef;
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none !important;
+        }
+
+        .consent-container {
+            text-align: left;
+        }
+
+        .consent-text {
+            font-size: 14px;
+            color: #666;
+            line-height: 1.6;
+            margin-bottom: 20px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            border-left: 4px solid #00BCD4;
+        }
+
+        .consent-checkbox {
+            display: flex;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .consent-checkbox input {
+            margin-right: 10px;
+            transform: scale(1.2);
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: #333;
+            font-weight: 500;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 12px 15px;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s ease;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: #00BCD4;
+            box-shadow: 0 0 0 3px rgba(0, 188, 212, 0.1);
+        }
+
+        .result-container {
+            text-align: center;
+            padding: 20px 0;
+        }
+
+        .result-score {
+            font-size: 48px;
+            font-weight: 300;
+            color: #00BCD4;
+            margin-bottom: 10px;
+        }
+
+        .result-category {
+            font-size: 24px;
+            font-weight: 500;
+            margin-bottom: 20px;
+            color: #333;
+        }
+
+        .result-interpretation {
+            font-size: 16px;
+            color: #666;
+            line-height: 1.6;
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+
+        .result-date {
+            font-size: 12px;
+            color: #999;
+        }
+
+        @media (max-width: 480px) {
+            .container {
+                margin: 10px;
+                border-radius: 15px;
+            }
+            
+            .content {
+                padding: 30px 20px;
+            }
+            
+            .question {
+                font-size: 16px;
+            }
+            
+            .option {
+                padding: 12px 15px;
+                font-size: 14px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">
+                <img src="/static/logo.jpeg" alt="Logo Dr. Guilherme Bueno">
+            </div>
+            <h1>Questionário GAD-7</h1>
+            <div class="subtitle">Escala de Ansiedade Generalizada</div>
+            <div class="doctor-info">Dr. Guilherme Bueno - CRM 140616</div>
+        </div>
+
+        <div class="content">
+            <!-- Cadastro Inicial -->
+            <div id="registration" class="question-container active">
+                <div class="question-number">IDENTIFICAÇÃO</div>
+                <div class="question">Por favor, informe seus dados para iniciarmos:</div>
+                
+                <div class="form-group">
+                    <label for="firstName">Nome:</label>
+                    <input type="text" id="firstName" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="lastName">Sobrenome:</label>
+                    <input type="text" id="lastName" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="birthDate">Data de Nascimento:</label>
+                    <input type="date" id="birthDate" required>
+                </div>
+
+                <div class="consent-container">
+                    <div class="consent-text">
+                        <strong>Termo de Consentimento</strong><br><br>
+                        Ao prosseguir, você consente que suas respostas sejam coletadas e analisadas para fins de avaliação clínica pelo Dr. Guilherme Bueno (CRM 140616). Seus dados serão tratados com confidencialidade e utilizados exclusivamente para seu acompanhamento médico.
+                    </div>
+                    
+                    <div class="consent-checkbox">
+                        <input type="checkbox" id="consent" required>
+                        <label for="consent">Li e concordo com os termos acima</label>
+                    </div>
+                </div>
+
+                <div class="navigation">
+                    <div></div>
+                    <button class="btn btn-primary" onclick="startQuestionnaire()" id="startBtn" disabled>Iniciar Questionário</button>
+                </div>
+            </div>
+
+            <!-- Perguntas do GAD-7 -->
+            <div id="questions" style="display: none;">
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill"></div>
+                </div>
+                <div class="progress-text" id="progressText">Pergunta 1 de 7</div>
+
+                <!-- Pergunta Template -->
+                <div class="question-container" id="questionTemplate">
+                    <div class="question-number" id="questionNumber">PERGUNTA 1</div>
+                    <div class="question" id="questionText">
+                        Nas últimas 2 semanas, com que frequência você percebeu-se incomodado por:<br><br>
+                        <strong>Sentir-se nervoso, ansioso ou muito tenso?</strong>
+                    </div>
+                    
+                    <div class="options">
+                        <div class="option" onclick="selectOption(0)" data-value="0">
+                            <strong>0 - Nenhuma vez</strong>
+                        </div>
+                        <div class="option" onclick="selectOption(1)" data-value="1">
+                            <strong>1 - Vários dias</strong>
+                        </div>
+                        <div class="option" onclick="selectOption(2)" data-value="2">
+                            <strong>2 - Mais da metade dos dias</strong>
+                        </div>
+                        <div class="option" onclick="selectOption(3)" data-value="3">
+                            <strong>3 - Quase todos os dias</strong>
+                        </div>
+                    </div>
+
+                    <div class="navigation">
+                        <button class="btn btn-secondary" onclick="previousQuestion()" id="prevBtn" style="display: none;">Anterior</button>
+                        <button class="btn btn-primary" onclick="nextQuestion()" id="nextBtn" disabled>Próxima</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Resultado -->
+            <div id="result" class="question-container">
+                <div class="result-container">
+                    <div class="result-score" id="resultScore">0/21</div>
+                    <div class="result-category" id="resultCategory">Ansiedade Mínima</div>
+                    <div class="result-interpretation" id="resultInterpretation">
+                        Seus sintomas de ansiedade estão em um nível muito baixo.
+                    </div>
+                    <div class="result-date" id="resultDate"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const questions = [
+            "Sentir-se nervoso, ansioso ou muito tenso?",
+            "Não conseguir parar ou controlar as preocupações?",
+            "Preocupar-se muito com diversas coisas?",
+            "Ter dificuldade para relaxar?",
+            "Ficar tão agitado que se torna difícil permanecer parado?",
+            "Ficar facilmente aborrecido ou irritado?",
+            "Sentir medo como se algo terrível fosse acontecer?"
+        ];
+
+        let currentQuestion = 0;
+        let answers = [];
+        let patientData = {};
+
+        // Validação do formulário de cadastro
+        document.addEventListener('DOMContentLoaded', function() {
+            const inputs = ['firstName', 'lastName', 'birthDate'];
+            const consent = document.getElementById('consent');
+            const startBtn = document.getElementById('startBtn');
+
+            function validateForm() {
+                const allFilled = inputs.every(id => document.getElementById(id).value.trim() !== '');
+                const consentChecked = consent.checked;
+                startBtn.disabled = !(allFilled && consentChecked);
+            }
+
+            inputs.forEach(id => {
+                document.getElementById(id).addEventListener('input', validateForm);
+            });
+            consent.addEventListener('change', validateForm);
+        });
+
+        function startQuestionnaire() {
+            // Coletar dados do paciente
+            patientData = {
+                firstName: document.getElementById('firstName').value,
+                lastName: document.getElementById('lastName').value,
+                birthDate: document.getElementById('birthDate').value
+            };
+
+            // Esconder cadastro e mostrar questionário
+            document.getElementById('registration').style.display = 'none';
+            document.getElementById('questions').style.display = 'block';
+            
+            updateQuestion();
+        }
+
+        function updateQuestion() {
+            const questionText = document.getElementById('questionText');
+            const questionNumber = document.getElementById('questionNumber');
+            const progressFill = document.getElementById('progressFill');
+            const progressText = document.getElementById('progressText');
+            const prevBtn = document.getElementById('prevBtn');
+            const nextBtn = document.getElementById('nextBtn');
+
+            // Atualizar conteúdo
+            questionNumber.textContent = `PERGUNTA ${currentQuestion + 1}`;
+            questionText.innerHTML = `
+                Nas últimas 2 semanas, com que frequência você percebeu-se incomodado por:<br><br>
+                <strong>${questions[currentQuestion]}</strong>
+            `;
+
+            // Atualizar progresso
+            const progress = ((currentQuestion + 1) / questions.length) * 100;
+            progressFill.style.width = progress + '%';
+            progressText.textContent = `Pergunta ${currentQuestion + 1} de ${questions.length}`;
+
+            // Atualizar botões
+            prevBtn.style.display = currentQuestion > 0 ? 'block' : 'none';
+            nextBtn.textContent = currentQuestion === questions.length - 1 ? 'Finalizar' : 'Próxima';
+            nextBtn.disabled = answers[currentQuestion] === undefined;
+
+            // Limpar seleções
+            document.querySelectorAll('.option').forEach(option => {
+                option.classList.remove('selected');
+            });
+
+            // Restaurar seleção se existir
+            if (answers[currentQuestion] !== undefined) {
+                const selectedOption = document.querySelector(`[data-value="${answers[currentQuestion]}"]`);
+                if (selectedOption) {
+                    selectedOption.classList.add('selected');
+                }
+            }
+        }
+
+        function selectOption(value) {
+            answers[currentQuestion] = value;
+            
+            // Atualizar visual
+            document.querySelectorAll('.option').forEach(option => {
+                option.classList.remove('selected');
+            });
+            document.querySelector(`[data-value="${value}"]`).classList.add('selected');
+            
+            // Habilitar botão próxima
+            document.getElementById('nextBtn').disabled = false;
+        }
+
+        function nextQuestion() {
+            if (currentQuestion < questions.length - 1) {
+                currentQuestion++;
+                updateQuestion();
+            } else {
+                showResult();
+            }
+        }
+
+        function previousQuestion() {
+            if (currentQuestion > 0) {
+                currentQuestion--;
+                updateQuestion();
+            }
+        }
+
+        function showResult() {
+            // Calcular pontuação
+            const totalScore = answers.reduce((sum, answer) => sum + answer, 0);
+            
+            // Determinar categoria
+            let category, interpretation;
+            if (totalScore <= 4) {
+                category = "Ansiedade Mínima";
+                interpretation = "Seus sintomas de ansiedade estão em um nível muito baixo. Continue mantendo seus hábitos saudáveis.";
+            } else if (totalScore <= 9) {
+                category = "Ansiedade Leve";
+                interpretation = "Você apresenta sintomas leves de ansiedade. Considere técnicas de relaxamento e atividade física regular.";
+            } else if (totalScore <= 14) {
+                category = "Ansiedade Moderada";
+                interpretation = "Você apresenta sintomas moderados de ansiedade. É recomendado conversar com um profissional de saúde mental.";
+            } else {
+                category = "Ansiedade Severa";
+                interpretation = "Você apresenta sintomas severos de ansiedade. É altamente recomendado buscar ajuda profissional imediatamente.";
+            }
+
+            // Atualizar resultado
+            document.getElementById('resultScore').textContent = `${totalScore}/21`;
+            document.getElementById('resultCategory').textContent = category;
+            document.getElementById('resultInterpretation').textContent = interpretation;
+            document.getElementById('resultDate').textContent = `Avaliação realizada em ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')}`;
+
+            // Mostrar resultado
+            document.getElementById('questions').style.display = 'none';
+            document.getElementById('result').style.display = 'block';
+
+            // Salvar resultado (aqui você enviaria para o backend)
+            saveResult({
+                patient: patientData,
+                answers: answers,
+                totalScore: totalScore,
+                category: category,
+                date: new Date().toISOString()
+            });
+        }
+
+        function saveResult(resultData) {
+            // Aqui você enviaria os dados para o backend
+            console.log('Resultado salvo:', resultData);
+            
+            // Por enquanto, apenas log no console
+            // Implementar chamada AJAX para salvar no banco de dados
+        }
+    </script>
+</body>
+</html>
