@@ -581,3 +581,29 @@ def test_send_direct(phone_number):
         print(f"💥 Error in test endpoint: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
+
+
+@app.route("/api/admin/configure", methods=['POST'])
+def configure_environment():
+    """Endpoint para configurar variáveis de ambiente"""
+    try:
+        # Configurar variáveis globalmente
+        global WHATSAPP_ACCESS_TOKEN, WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_WEBHOOK_VERIFY_TOKEN
+        
+        WHATSAPP_ACCESS_TOKEN = "EAANTZCXB0csgBPft9y6ZBIdeTVM5PVLr2ZBZAlTGd49ezcAklZCF4DDZC6r6NQ4nrDREkNnC6iEebI7YxciceIMF9BD9Cwp8OqVpBYxeZB2gAZADsVQZCsDbDZAlaPZC3iByj0ZAn2eaSrmjPaQPqZBX6UJZAK6Hd8MuXGoKVrLFPooE7so4G1w2wYNaxJYn1SgQ6RnwZDZD"
+        WHATSAPP_PHONE_NUMBER_ID = "797803706754193"
+        WHATSAPP_WEBHOOK_VERIFY_TOKEN = "verify_123"
+        
+        print(f"🔧 Configured TOKEN: {WHATSAPP_ACCESS_TOKEN[:20]}...")
+        print(f"🔧 Configured PHONE_ID: {WHATSAPP_PHONE_NUMBER_ID}")
+        
+        return jsonify({
+            "status": "success",
+            "message": "Environment variables configured",
+            "token_configured": bool(WHATSAPP_ACCESS_TOKEN),
+            "phone_id_configured": bool(WHATSAPP_PHONE_NUMBER_ID)
+        })
+        
+    except Exception as e:
+        print(f"💥 Error configuring: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
