@@ -19,7 +19,7 @@ from src.routes.medication import medication_bp
 from src.routes.mood import mood_bp
 from src.routes.scheduler import scheduler_bp
 from src.routes.iclinic import iclinic_bp
-from src.routes.admin_tasks import admin_tasks_bp
+#from src.routes.admin_tasks import admin_tasks_bp
 from src.routes.admin_patient import admin_patient_bp
 from src.admin.routes import admin_bp
 from src.admin.services.scheduler_service import init_campaign_scheduler
@@ -67,7 +67,7 @@ app.register_blueprint(medication_bp, url_prefix="/api")
 app.register_blueprint(mood_bp, url_prefix="/api")
 app.register_blueprint(scheduler_bp, url_prefix="/api/scheduler")
 app.register_blueprint(iclinic_bp, url_prefix="/api/iclinic")
-app.register_blueprint(admin_tasks_bp, url_prefix="/api/admin")
+#app.register_blueprint(admin_tasks_bp, url_prefix="/api/admin")
 app.register_blueprint(admin_patient_bp, url_prefix="/api/admin")
 app.register_blueprint(admin_bp)  # Admin UI sem prefix
 
