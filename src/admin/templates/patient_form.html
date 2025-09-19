@@ -247,7 +247,8 @@ document.addEventListener('DOMContentLoaded', function() {
         fetch('/admin/api/patients', {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
+                'X-Admin-Token': 'admin123456'
             },
             body: JSON.stringify(data)
         })
