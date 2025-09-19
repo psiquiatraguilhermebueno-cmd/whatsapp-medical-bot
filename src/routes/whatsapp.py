@@ -1,211 +1,157 @@
-import os
-import hmac
-import hashlib
+"""
+Webhook integrado para WhatsApp com processamento automático
+"""
+
+import json
+import logging
+import requests
 from flask import Blueprint, request, jsonify
-from src.services.whatsapp_service import WhatsAppService
-from src.services.message_handler import MessageHandler
+from src.services.response_processor import response_processor
+from src.models.patient import Patient
+
+logger = logging.getLogger(__name__)
 
 whatsapp_bp = Blueprint('whatsapp', __name__)
-whatsapp_service = WhatsAppService()
-message_handler = MessageHandler()
 
-def verify_webhook_signature(payload, signature):
-    """
-    Verificar assinatura X-Hub-Signature-256 do webhook
-    """
-    app_secret = os.environ.get('APP_SECRET')
-    if not app_secret:
-        print("WARNING: APP_SECRET não configurado - validação de webhook desabilitada")
-        return True  # Permitir em desenvolvimento se não configurado
+@whatsapp_bp.route('/api/whatsapp/webhook', methods=['GET', 'POST'])
+def whatsapp_webhook():
+    """Webhook principal do WhatsApp"""
     
-    if not signature:
-        return False
-    
-    # Remover prefixo 'sha256=' se presente
-    if signature.startswith('sha256='):
-        signature = signature[7:]
-    
-    # Calcular hash esperado
-    expected_signature = hmac.new(
-        app_secret.encode('utf-8'),
-        payload,
-        hashlib.sha256
-    ).hexdigest()
-    
-    # Comparação segura
-    return hmac.compare_digest(expected_signature, signature)
+    if request.method == 'GET':
+        return verify_webhook()
+    elif request.method == 'POST':
+        return handle_message()
 
-@whatsapp_bp.route('/webhook', methods=['GET'])
 def verify_webhook():
-    """Verificar webhook do WhatsApp"""
-    mode = request.args.get('hub.mode')
-    token = request.args.get('hub.verify_token')
-    challenge = request.args.get('hub.challenge')
-    
-    verification_result = whatsapp_service.verify_webhook(mode, token, challenge)
-    
-    if verification_result:
-        return verification_result, 200
-    else:
-        return 'Forbidden', 403
-
-@whatsapp_bp.route('/webhook', methods=['POST'])
-def receive_message():
-    """Receber mensagens do WhatsApp via webhook"""
+    """Verifica webhook do WhatsApp"""
     try:
-        # Obter dados brutos para validação de assinatura
-        payload = request.get_data()
-        signature = request.headers.get('X-Hub-Signature-256')
+        verify_token = request.args.get('hub.verify_token')
+        challenge = request.args.get('hub.challenge')
         
-        # Validar assinatura do webhook
-        if not verify_webhook_signature(payload, signature):
-            print("SECURITY WARNING: Webhook signature validation failed")
-            return jsonify({'status': 'error', 'message': 'Invalid signature'}), 403
-        
-        # Processar dados JSON
-        webhook_data = request.get_json()
-        
-        if not webhook_data:
-            return jsonify({'status': 'error', 'message': 'No data received'}), 400
-        
-        # Processar a mensagem
-        parsed_message = whatsapp_service.parse_webhook_message(webhook_data)
-        
-        if parsed_message:
-            # Marcar mensagem como lida
-            whatsapp_service.mark_message_as_read(parsed_message['message_id'])
+        if verify_token == os.getenv('WHATSAPP_WEBHOOK_VERIFY_TOKEN'):
+            logger.info("Webhook verificado com sucesso")
+            return challenge
+        else:
+            logger.warning("Token de verificação inválido")
+            return "Token inválido", 403
             
-            # Processar a mensagem através do handler
-            response = message_handler.handle_message(parsed_message)
-            
-            return jsonify({
-                'status': 'success',
-                'message': 'Message processed',
-                'response': response
-            }), 200
-        
-        return jsonify({'status': 'success', 'message': 'No message to process'}), 200
-        
     except Exception as e:
-        print(f"Erro ao processar webhook: {e}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        logger.error(f"Erro na verificação do webhook: {e}")
+        return "Erro interno", 500
 
-@whatsapp_bp.route('/send-message', methods=['POST'])
-def send_message():
-    """Endpoint para enviar mensagens via API"""
+def handle_message():
+    """Processa mensagens recebidas"""
     try:
         data = request.get_json()
         
-        if not data or 'to' not in data or 'message' not in data:
-            return jsonify({'error': 'Campos obrigatórios: to, message'}), 400
+        if not data or 'entry' not in data:
+            return jsonify({"status": "ok"})
         
-        to = whatsapp_service.format_phone_number(data['to'])
-        message = data['message']
+        for entry in data['entry']:
+            if 'changes' not in entry:
+                continue
+                
+            for change in entry['changes']:
+                if change.get('field') != 'messages':
+                    continue
+                
+                value = change.get('value', {})
+                messages = value.get('messages', [])
+                
+                for message in messages:
+                    process_incoming_message(message, value)
         
-        result = whatsapp_service.send_text_message(to, message)
+        return jsonify({"status": "ok"})
         
-        if result['success']:
-            return jsonify({
-                'status': 'success',
-                'message': 'Message sent successfully',
-                'response': result['response']
-            }), 200
-        else:
-            return jsonify({
-                'status': 'error',
-                'message': 'Failed to send message',
-                'error': result.get('error'),
-                'response': result.get('response')
-            }), result.get('status_code', 500)
+    except Exception as e:
+        logger.error(f"Erro ao processar mensagem: {e}")
+        return jsonify({"status": "error"}), 500
+
+def process_incoming_message(message: dict, value: dict):
+    """Processa mensagem individual"""
+    try:
+        # Extrai dados da mensagem
+        phone = message.get('from')
+        message_type = message.get('type')
+        
+        if message_type != 'text':
+            return
+        
+        text = message.get('text', {}).get('body', '').strip()
+        
+        if not phone or not text:
+            return
+        
+        logger.info(f"Mensagem recebida de {phone}: {text}")
+        
+        # Processa resposta
+        response_text = response_processor.process_response(phone, text)
+        
+        if response_text:
+            send_whatsapp_message(phone, response_text)
             
     except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        logger.error(f"Erro ao processar mensagem individual: {e}")
 
-@whatsapp_bp.route('/send-interactive', methods=['POST'])
-def send_interactive():
-    """Endpoint para enviar mensagens interativas"""
+def send_whatsapp_message(phone: str, message: str) -> bool:
+    """Envia mensagem via WhatsApp Business API"""
     try:
-        data = request.get_json()
+        access_token = os.getenv('WHATSAPP_ACCESS_TOKEN')
+        phone_number_id = os.getenv('WHATSAPP_PHONE_NUMBER_ID')
         
-        required_fields = ['to', 'header', 'body', 'buttons']
-        if not data or not all(field in data for field in required_fields):
-            return jsonify({'error': 'Campos obrigatórios: to, header, body, buttons'}), 400
+        if not access_token or not phone_number_id:
+            logger.error("Credenciais WhatsApp não configuradas")
+            return False
         
-        to = whatsapp_service.format_phone_number(data['to'])
-        header = data['header']
-        body = data['body']
-        buttons = data['buttons']
+        url = f"https://graph.facebook.com/v18.0/{phone_number_id}/messages"
         
-        result = whatsapp_service.send_interactive_message(to, header, body, buttons)
+        headers = {
+            'Authorization': f'Bearer {access_token}',
+            'Content-Type': 'application/json'
+        }
         
-        if result['success']:
-            return jsonify({
-                'status': 'success',
-                'message': 'Interactive message sent successfully',
-                'response': result['response']
-            }), 200
+        payload = {
+            "messaging_product": "whatsapp",
+            "to": phone,
+            "type": "text",
+            "text": {
+                "body": message
+            }
+        }
+        
+        response = requests.post(url, headers=headers, json=payload, timeout=10)
+        
+        if response.status_code == 200:
+            logger.info(f"Mensagem enviada para {phone}")
+            return True
         else:
-            return jsonify({
-                'status': 'error',
-                'message': 'Failed to send interactive message',
-                'error': result.get('error'),
-                'response': result.get('response')
-            }), result.get('status_code', 500)
+            logger.error(f"Erro ao enviar mensagem: {response.status_code} - {response.text}")
+            return False
             
     except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        logger.error(f"Erro ao enviar mensagem WhatsApp: {e}")
+        return False
 
-@whatsapp_bp.route('/send-audio', methods=['POST'])
-def send_audio():
-    """Endpoint para enviar áudio"""
+def start_questionnaire_for_patient(patient_id: int, questionnaire_type: str) -> bool:
+    """Inicia questionário para paciente específico"""
     try:
-        data = request.get_json()
+        # Busca dados do paciente
+        patient = Patient.query.get(patient_id)
+        if not patient:
+            logger.error(f"Paciente {patient_id} não encontrado")
+            return False
         
-        if not data or 'to' not in data or 'audio_url' not in data:
-            return jsonify({'error': 'Campos obrigatórios: to, audio_url'}), 400
+        phone = patient.phone_e164
+        if not phone:
+            logger.error(f"Telefone não encontrado para paciente {patient_id}")
+            return False
         
-        to = whatsapp_service.format_phone_number(data['to'])
-        audio_url = data['audio_url']
+        # Inicia questionário
+        message = response_processor.start_questionnaire(patient_id, phone, questionnaire_type)
         
-        result = whatsapp_service.send_audio_message(to, audio_url)
-        
-        if result['success']:
-            return jsonify({
-                'status': 'success',
-                'message': 'Audio sent successfully',
-                'response': result['response']
-            }), 200
-        else:
-            return jsonify({
-                'status': 'error',
-                'message': 'Failed to send audio',
-                'error': result.get('error'),
-                'response': result.get('response')
-            }), result.get('status_code', 500)
-            
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
-@whatsapp_bp.route('/test-connection', methods=['GET'])
-def test_connection():
-    """Testar conexão com a API do WhatsApp"""
-    try:
-        # Tentar fazer uma requisição simples para verificar a conexão
-        test_number = "5511999999999"  # Número de teste
-        test_message = "Teste de conexão - ignore esta mensagem"
-        
-        result = whatsapp_service.send_text_message(test_number, test_message)
-        
-        return jsonify({
-            'status': 'connection_tested',
-            'whatsapp_api_configured': bool(whatsapp_service.access_token and whatsapp_service.phone_number_id),
-            'test_result': result
-        }), 200
+        # Envia primeira pergunta
+        return send_whatsapp_message(phone, message)
         
     except Exception as e:
-        return jsonify({
-            'status': 'error',
-            'message': str(e),
-            'whatsapp_api_configured': bool(whatsapp_service.access_token and whatsapp_service.phone_number_id)
-        }), 500
-
+        logger.error(f"Erro ao iniciar questionário: {e}")
+        return False
