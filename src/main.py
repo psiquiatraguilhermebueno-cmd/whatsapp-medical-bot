@@ -345,6 +345,79 @@ def create_tables_endpoint():
         }), 500
 
 
+
+@app.route('/admin/api/patients/simple', methods=['POST'])
+def create_patient_simple():
+    """Endpoint simplificado para criar paciente"""
+    try:
+        # Verifica token admin
+        admin_token = request.headers.get('X-Admin-Token')
+        if admin_token != 'admin123456':
+            return jsonify({'error': 'Unauthorized'}), 401
+        
+        # Obter dados
+        data = request.get_json() or {}
+        name = data.get('name', '').strip()
+        phone = data.get('phone', '').strip()
+        
+        if not name or not phone:
+            return jsonify({'error': 'Nome e telefone obrigatórios'}), 400
+        
+        # Limpar telefone
+        phone_clean = ''.join(filter(str.isdigit, phone))
+        phone_e164 = f"+55{phone_clean}" if not phone_clean.startswith('55') else f"+{phone_clean}"
+        
+        # Usar SQL direto
+        import sqlite3
+        db_path = "instance/medical_bot.db"
+        os.makedirs("instance", exist_ok=True)
+        
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        
+        # Criar tabela se não existir
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS patients (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name VARCHAR(255) NOT NULL,
+            phone_e164 VARCHAR(20) UNIQUE NOT NULL,
+            phone_masked VARCHAR(20),
+            email VARCHAR(255),
+            birth_date DATE,
+            gender CHAR(1),
+            priority VARCHAR(20) DEFAULT 'normal',
+            notes TEXT,
+            active BOOLEAN DEFAULT 1,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """)
+        
+        # Inserir paciente
+        cursor.execute("""
+        INSERT OR REPLACE INTO patients 
+        (name, phone_e164, phone_masked, email, birth_date, gender, priority, notes, active)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            name, phone_e164, phone, 
+            data.get('email', ''), data.get('birth_date', '1990-01-01'),
+            data.get('gender', 'M'), data.get('priority', 'normal'),
+            data.get('notes', ''), 1
+        ))
+        
+        patient_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Paciente criado com sucesso',
+            'patient': {'id': patient_id, 'name': name, 'phone': phone}
+        }), 201
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 if __name__ == "__main__":
     # Validar ambiente
     validate_environment()
