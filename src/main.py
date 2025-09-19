@@ -4,6 +4,10 @@ import requests
 from datetime import datetime
 from flask import Flask, request, jsonify
 
+# Carregar variáveis de ambiente do arquivo .env
+from dotenv import load_dotenv
+load_dotenv()
+
 app = Flask(__name__)
 
 # Configurações WhatsApp
