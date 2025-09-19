@@ -746,3 +746,99 @@ def api_patient_toggle(patient_id):
         logger.error(f"Error toggling patient {patient_id}: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
+
+def send_immediate_templates(patient_data):
+    """
+    Envia templates imediatamente após cadastro do paciente
+    """
+    import requests
+    import os
+    from datetime import datetime
+    
+    # Configurações WhatsApp
+    access_token = os.getenv('WHATSAPP_ACCESS_TOKEN')
+    phone_number_id = os.getenv('WHATSAPP_PHONE_NUMBER_ID')
+    
+    if not access_token or not phone_number_id:
+        print("⚠️ Configurações WhatsApp não encontradas")
+        return False
+    
+    patient_phone = patient_data.get('phone', '').replace('(', '').replace(')', '').replace('-', '').replace(' ', '')
+    if not patient_phone.startswith('55'):
+        patient_phone = '55' + patient_phone
+    
+    patient_name = patient_data.get('name', 'Paciente')
+    protocols = patient_data.get('protocols', {})
+    
+    sent_templates = []
+    
+    # Mapear protocolos para templates
+    template_mapping = {
+        'uetg': 'uetg_paciente_agenda_ptbr',
+        'gad7': 'gad7_checkin_ptbr', 
+        'phq9': 'phq9_checkin_ptbr',
+        'asrs18': 'asrs18_checkin_ptbr'
+    }
+    
+    for protocol, config in protocols.items():
+        if config.get('immediate', False):
+            template_name = template_mapping.get(protocol)
+            
+            if template_name:
+                success = send_whatsapp_template(
+                    access_token, 
+                    phone_number_id, 
+                    patient_phone, 
+                    template_name, 
+                    patient_name
+                )
+                
+                if success:
+                    sent_templates.append(protocol.upper())
+                    print(f"✅ Template {protocol.upper()} enviado para {patient_name}")
+                else:
+                    print(f"❌ Falha ao enviar template {protocol.upper()}")
+    
+    return sent_templates
+
+def send_whatsapp_template(access_token, phone_number_id, recipient, template_name, patient_name):
+    """
+    Envia template WhatsApp
+    """
+    url = f"https://graph.facebook.com/v18.0/{phone_number_id}/messages"
+    
+    headers = {
+        'Authorization': f'Bearer {access_token}',
+        'Content-Type': 'application/json'
+    }
+    
+    message_data = {
+        "messaging_product": "whatsapp",
+        "to": recipient,
+        "type": "template",
+        "template": {
+            "name": template_name,
+            "language": {
+                "code": "pt_BR"
+            },
+            "components": [
+                {
+                    "type": "body",
+                    "parameters": [
+                        {
+                            "type": "text",
+                            "text": patient_name
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, json=message_data, timeout=30)
+        return response.status_code == 200
+    except Exception as e:
+        print(f"Erro ao enviar template: {e}")
+        return False
+
