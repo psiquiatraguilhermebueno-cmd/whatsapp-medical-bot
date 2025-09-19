@@ -6,6 +6,8 @@ import logging
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from flask import Flask, send_from_directory
+import requests
+from datetime import datetime
 from flask_cors import CORS
 from src.models.user import db
 from src.routes.user import user_bp
@@ -416,6 +418,161 @@ def create_patient_simple():
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+
+
+@app.route('/api/send-template', methods=['POST'])
+def send_template():
+    """Endpoint para enviar templates WhatsApp"""
+    try:
+        data = request.get_json()
+        template_name = data.get('template_name')
+        recipient_phone = data.get('recipient_phone')
+        patient_name = data.get('patient_name', 'Paciente')
+        
+        # Configurações WhatsApp
+        access_token = os.getenv('WHATSAPP_ACCESS_TOKEN')
+        phone_number_id = os.getenv('WHATSAPP_PHONE_NUMBER_ID')
+        
+        if not access_token or not phone_number_id:
+            return jsonify({"error": "Configurações WhatsApp não encontradas"}), 500
+        
+        # URL da API WhatsApp
+        url = f"https://graph.facebook.com/v18.0/{phone_number_id}/messages"
+        
+        # Headers
+        headers = {
+            'Authorization': f'Bearer {access_token}',
+            'Content-Type': 'application/json'
+        }
+        
+        # Payload da mensagem
+        message_data = {
+            "messaging_product": "whatsapp",
+            "to": recipient_phone,
+            "type": "template",
+            "template": {
+                "name": template_name,
+                "language": {
+                    "code": "pt_BR"
+                },
+                "components": [
+                    {
+                        "type": "body",
+                        "parameters": [
+                            {
+                                "type": "text",
+                                "text": patient_name
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+        
+        # Enviar mensagem
+        response = requests.post(url, headers=headers, json=message_data)
+        
+        if response.status_code == 200:
+            result = response.json()
+            return jsonify({
+                "success": True,
+                "message_id": result.get('messages', [{}])[0].get('id'),
+                "template": template_name,
+                "recipient": recipient_phone,
+                "timestamp": datetime.now().isoformat()
+            })
+        else:
+            return jsonify({
+                "success": False,
+                "error": response.text,
+                "status_code": response.status_code
+            }), 400
+            
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/test-templates', methods=['POST'])
+def test_templates():
+    """Endpoint para testar múltiplos templates"""
+    try:
+        data = request.get_json()
+        recipient_phone = data.get('recipient_phone', '5514997799022')
+        patient_name = data.get('patient_name', 'Dr. Guilherme')
+        
+        templates = [
+            'gad7_checkin_ptbr',
+            'phq9_checkin_ptbr'
+        ]
+        
+        results = []
+        
+        for template in templates:
+            # Fazer requisição interna para enviar template
+            template_data = {
+                'template_name': template,
+                'recipient_phone': recipient_phone,
+                'patient_name': patient_name
+            }
+            
+            # Simular envio (usar a função send_template diretamente)
+            try:
+                access_token = os.getenv('WHATSAPP_ACCESS_TOKEN')
+                phone_number_id = os.getenv('WHATSAPP_PHONE_NUMBER_ID')
+                
+                url = f"https://graph.facebook.com/v18.0/{phone_number_id}/messages"
+                headers = {
+                    'Authorization': f'Bearer {access_token}',
+                    'Content-Type': 'application/json'
+                }
+                
+                message_data = {
+                    "messaging_product": "whatsapp",
+                    "to": recipient_phone,
+                    "type": "template",
+                    "template": {
+                        "name": template,
+                        "language": {"code": "pt_BR"},
+                        "components": [{
+                            "type": "body",
+                            "parameters": [{"type": "text", "text": patient_name}]
+                        }]
+                    }
+                }
+                
+                response = requests.post(url, headers=headers, json=message_data)
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    results.append({
+                        "template": template,
+                        "success": True,
+                        "message_id": result.get('messages', [{}])[0].get('id')
+                    })
+                else:
+                    results.append({
+                        "template": template,
+                        "success": False,
+                        "error": response.text
+                    })
+                    
+            except Exception as e:
+                results.append({
+                    "template": template,
+                    "success": False,
+                    "error": str(e)
+                })
+        
+        return jsonify({
+            "success": True,
+            "results": results,
+            "total_sent": len([r for r in results if r['success']]),
+            "total_templates": len(templates)
+        })
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 if __name__ == "__main__":
