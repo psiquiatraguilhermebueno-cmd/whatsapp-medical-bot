@@ -352,6 +352,35 @@ if __name__ == "__main__":
     # Inicializar banco de dados
     with app.app_context():
         create_tables()
+
+    # FORÇA CRIAÇÃO DE TABELAS (ADICIONADO AUTOMATICAMENTE)
+    try:
+        with app.app_context():
+            # Força criação de todas as tabelas
+            db.create_all()
+            
+            # Verifica se as tabelas foram criadas
+            inspector = db.inspect(db.engine)
+            tables = inspector.get_table_names()
+            
+            logger.info(f"✅ Tabelas disponíveis: {tables}")
+            
+            # Verifica tabelas essenciais
+            essential_tables = ['patients', 'responses', 'schedules']
+            missing_tables = [t for t in essential_tables if t not in tables]
+            
+            if missing_tables:
+                logger.warning(f"⚠️ Tabelas ausentes: {missing_tables}")
+                # Tenta criar novamente
+                db.create_all()
+                logger.info("🔄 Tentativa adicional de criação de tabelas")
+            else:
+                logger.info("✅ Todas as tabelas essenciais estão presentes")
+                
+    except Exception as e:
+        logger.error(f"❌ Erro ao criar tabelas: {e}")
+        # Continua mesmo com erro para não quebrar a aplicação
+
     
     # Inicializar scheduler u-ETG (existente)
     if os.getenv("DISABLE_SCHEDULER") != "1":
