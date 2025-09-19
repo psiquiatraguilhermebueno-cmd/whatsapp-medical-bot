@@ -477,3 +477,27 @@ if __name__ == "__main__":
     print(f"🧹 Clear states: https://web-production-4fc41.up.railway.app/api/debug/clear")
     
     app.run(host="0.0.0.0", port=port, debug=False)
+
+@app.route("/api/test/send-direct/<phone_number>", methods=['POST'])
+def test_send_direct(phone_number):
+    """Endpoint para testar envio direto de mensagem"""
+    try:
+        data = request.get_json() or {}
+        message = data.get('message', 'Teste de mensagem direta')
+        
+        print(f"🧪 TEST ENDPOINT: Sending message to {phone_number}")
+        print(f"📝 Message: {message}")
+        
+        result = send_whatsapp_message(phone_number, message)
+        
+        return jsonify({
+            "status": "success" if result else "failed",
+            "message": f"Message {'sent' if result else 'failed'} to {phone_number}",
+            "phone": phone_number,
+            "text": message
+        })
+        
+    except Exception as e:
+        print(f"💥 Error in test endpoint: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
