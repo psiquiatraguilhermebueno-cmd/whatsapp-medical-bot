@@ -208,6 +208,8 @@ def process_gad7_response(phone_number, response_text):
     # Próxima pergunta ou resultado final
     state['current_question'] += 1
     
+    print(f"🔄 Updated state: question {state['current_question']}, total questions: {len(GAD7_QUESTIONS)}")
+    
     if state['current_question'] < len(GAD7_QUESTIONS):
         # Próxima pergunta
         next_q = state['current_question']
@@ -223,7 +225,13 @@ Responda apenas o número: 0, 1, 2 ou 3
 (Digite *cancelar* para interromper)"""
         
         message = feedback + next_question
-        print(f"📤 Sending question {next_q + 1}/7")
+        print(f"📤 Sending question {next_q + 1}/7 to {phone_number}")
+        print(f"📝 Message content: {message[:100]}...")
+        
+        # Enviar mensagem e verificar resultado
+        result = send_whatsapp_message(phone_number, message)
+        print(f"📊 Message send result: {result}")
+        return result
     else:
         # Calcular resultado final
         total_score = sum(state['responses'])
