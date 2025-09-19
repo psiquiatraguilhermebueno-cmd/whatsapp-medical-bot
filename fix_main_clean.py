@@ -1,4 +1,14 @@
-import os
+#!/usr/bin/env python3
+"""
+Cria versão limpa e funcional do main.py
+"""
+
+def create_clean_main():
+    """
+    Cria main.py limpo e funcional
+    """
+    
+    clean_main = '''import os
 import sys
 import logging
 
@@ -145,3 +155,14 @@ if __name__ == "__main__":
     logger.info(f"Health check: http://localhost:{port}/health")
     
     app.run(host="0.0.0.0", port=port, debug=debug)
+'''
+    
+    # Salvar main.py limpo
+    with open('src/main.py', 'w', encoding='utf-8') as f:
+        f.write(clean_main)
+    
+    print("✅ main.py limpo criado")
+    return True
+
+if __name__ == "__main__":
+    create_clean_main()
