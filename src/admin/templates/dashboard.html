@@ -1,0 +1,353 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Admin WhatsApp Bot{% endblock %}
+{% block page_title %}Dashboard{% endblock %}
+
+{% block content %}
+<div x-data="dashboard()" x-init="init()">
+    <!-- Stats Cards -->
+    <div class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4 mb-8">
+        <!-- Total Campanhas -->
+        <div class="bg-white overflow-hidden shadow rounded-lg">
+            <div class="p-5">
+                <div class="flex items-center">
+                    <div class="flex-shrink-0">
+                        <svg class="h-6 w-6 text-blue-400" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M10.34 15.84c-.688-.06-1.386-.09-2.09-.09H7.5a4.5 4.5 0 110-9h.75c.704 0 1.402-.03 2.09-.09m0 9.18c.253.962.584 1.892.985 2.783.247.55.06 1.21-.463 1.511l-.657.38c-.551.318-1.26.117-1.527-.461a20.845 20.845 0 01-1.44-4.282m3.102.069a18.03 18.03 0 01-.59-4.59c0-1.586.205-3.124.59-4.59m0 9.18a23.848 23.848 0 018.835 2.535M10.34 6.66a23.847 23.847 0 008.835-2.535m0 0A23.74 23.74 0 0018.795 3m.38 1.125a23.91 23.91 0 011.014 5.395m-1.014 8.855c-.118.38-.245.754-.38 1.125m.38-1.125a23.91 23.91 0 001.014-5.395m0-3.46c.495.413.811 1.035.811 1.73 0 .695-.316 1.317-.811 1.73m0-3.46a24.347 24.347 0 010 3.46" />
+                        </svg>
+                    </div>
+                    <div class="ml-5 w-0 flex-1">
+                        <dl>
+                            <dt class="text-sm font-medium text-gray-500 truncate">Total Campanhas</dt>
+                            <dd class="text-lg font-medium text-gray-900" x-text="stats.total_campaigns">-</dd>
+                        </dl>
+                    </div>
+                </div>
+            </div>
+            <div class="bg-gray-50 px-5 py-3">
+                <div class="text-sm">
+                    <span class="font-medium text-green-600" x-text="stats.active_campaigns">-</span>
+                    <span class="text-gray-500">ativas</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Total Pacientes -->
+        <div class="bg-white overflow-hidden shadow rounded-lg">
+            <div class="p-5">
+                <div class="flex items-center">
+                    <div class="flex-shrink-0">
+                        <svg class="h-6 w-6 text-green-400" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" />
+                        </svg>
+                    </div>
+                    <div class="ml-5 w-0 flex-1">
+                        <dl>
+                            <dt class="text-sm font-medium text-gray-500 truncate">Total Pacientes</dt>
+                            <dd class="text-lg font-medium text-gray-900" x-text="stats.total_patients">-</dd>
+                        </dl>
+                    </div>
+                </div>
+            </div>
+            <div class="bg-gray-50 px-5 py-3">
+                <div class="text-sm">
+                    <span class="font-medium text-green-600" x-text="stats.active_patients">-</span>
+                    <span class="text-gray-500">ativos</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Mensagens Hoje -->
+        <div class="bg-white overflow-hidden shadow rounded-lg">
+            <div class="p-5">
+                <div class="flex items-center">
+                    <div class="flex-shrink-0">
+                        <svg class="h-6 w-6 text-yellow-400" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" />
+                        </svg>
+                    </div>
+                    <div class="ml-5 w-0 flex-1">
+                        <dl>
+                            <dt class="text-sm font-medium text-gray-500 truncate">Mensagens Hoje</dt>
+                            <dd class="text-lg font-medium text-gray-900" x-text="stats.messages_today">-</dd>
+                        </dl>
+                    </div>
+                </div>
+            </div>
+            <div class="bg-gray-50 px-5 py-3">
+                <div class="text-sm">
+                    <span class="font-medium text-green-600" x-text="stats.success_rate">-%</span>
+                    <span class="text-gray-500">sucesso</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Próxima Execução -->
+        <div class="bg-white overflow-hidden shadow rounded-lg">
+            <div class="p-5">
+                <div class="flex items-center">
+                    <div class="flex-shrink-0">
+                        <svg class="h-6 w-6 text-purple-400" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                    </div>
+                    <div class="ml-5 w-0 flex-1">
+                        <dl>
+                            <dt class="text-sm font-medium text-gray-500 truncate">Próxima Execução</dt>
+                            <dd class="text-sm font-medium text-gray-900" x-text="stats.next_execution || 'Nenhuma'">-</dd>
+                        </dl>
+                    </div>
+                </div>
+            </div>
+            <div class="bg-gray-50 px-5 py-3">
+                <div class="text-sm">
+                    <span class="text-gray-500" x-text="stats.next_campaign || 'agendada'">-</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Quick Actions -->
+    <div class="mb-8">
+        <div class="bg-white shadow rounded-lg">
+            <div class="px-4 py-5 sm:p-6">
+                <h3 class="text-lg leading-6 font-medium text-gray-900 mb-4">Ações Rápidas</h3>
+                <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                    <a href="/admin/campaigns/new" 
+                       class="relative group bg-white p-6 focus-within:ring-2 focus-within:ring-inset focus-within:ring-blue-500 rounded-lg border border-gray-200 hover:border-blue-300 transition-colors">
+                        <div>
+                            <span class="rounded-lg inline-flex p-3 bg-blue-50 text-blue-700 ring-4 ring-white">
+                                <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                                </svg>
+                            </span>
+                        </div>
+                        <div class="mt-4">
+                            <h3 class="text-lg font-medium text-gray-900">Nova Campanha</h3>
+                            <p class="mt-2 text-sm text-gray-500">Criar uma nova campanha de mensagens WhatsApp</p>
+                        </div>
+                    </a>
+
+                    <a href="/admin/patients/new" 
+                       class="relative group bg-white p-6 focus-within:ring-2 focus-within:ring-inset focus-within:ring-green-500 rounded-lg border border-gray-200 hover:border-green-300 transition-colors">
+                        <div>
+                            <span class="rounded-lg inline-flex p-3 bg-green-50 text-green-700 ring-4 ring-white">
+                                <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M19 7.5v3m0 0v3m0-3h3m-3 0h-3m-2.25-4.125a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zM4 19.235v-.11a6.375 6.375 0 0112.674-1.334c.343.061.676.133 1.001.207m-13.241-4.18a4.5 4.5 0 009.75 3.533.75.75 0 00.5-.75v-3a.75.75 0 00-.5-.75 4.5 4.5 0 00-9.75 3.533z" />
+                                </svg>
+                            </span>
+                        </div>
+                        <div class="mt-4">
+                            <h3 class="text-lg font-medium text-gray-900">Novo Paciente</h3>
+                            <p class="mt-2 text-sm text-gray-500">Adicionar um novo paciente ao sistema</p>
+                        </div>
+                    </a>
+
+                    <button @click="testTemplate()" 
+                            class="relative group bg-white p-6 focus-within:ring-2 focus-within:ring-inset focus-within:ring-yellow-500 rounded-lg border border-gray-200 hover:border-yellow-300 transition-colors text-left">
+                        <div>
+                            <span class="rounded-lg inline-flex p-3 bg-yellow-50 text-yellow-700 ring-4 ring-white">
+                                <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M15.59 14.37a6 6 0 01-5.84 7.38v-4.8m5.84-2.58a14.98 14.98 0 006.16-12.12A14.98 14.98 0 009.631 8.41m5.96 5.96a14.926 14.926 0 01-5.841 2.58m-.119-8.54a6 6 0 00-7.381 5.84h4.8m2.581-5.84a14.927 14.927 0 00-2.58 5.84m2.58-5.84a14.927 14.927 0 015.84 2.58m-2.58 5.84a6.002 6.002 0 105.84-5.84m-5.84 5.84a6.002 6.002 0 01-5.84-5.84m5.84 5.84V19.5" />
+                                </svg>
+                            </span>
+                        </div>
+                        <div class="mt-4">
+                            <h3 class="text-lg font-medium text-gray-900">Testar Template</h3>
+                            <p class="mt-2 text-sm text-gray-500">Enviar um template de teste para verificar funcionamento</p>
+                        </div>
+                    </button>
+
+                    <a href="/admin/logs" 
+                       class="relative group bg-white p-6 focus-within:ring-2 focus-within:ring-inset focus-within:ring-purple-500 rounded-lg border border-gray-200 hover:border-purple-300 transition-colors">
+                        <div>
+                            <span class="rounded-lg inline-flex p-3 bg-purple-50 text-purple-700 ring-4 ring-white">
+                                <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+                                </svg>
+                            </span>
+                        </div>
+                        <div class="mt-4">
+                            <h3 class="text-lg font-medium text-gray-900">Ver Logs</h3>
+                            <p class="mt-2 text-sm text-gray-500">Visualizar logs de execução e erros do sistema</p>
+                        </div>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Recent Activity -->
+    <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <!-- Campanhas Recentes -->
+        <div class="bg-white shadow rounded-lg">
+            <div class="px-4 py-5 sm:p-6">
+                <h3 class="text-lg leading-6 font-medium text-gray-900 mb-4">Campanhas Recentes</h3>
+                <div class="space-y-3" x-show="recentCampaigns.length > 0">
+                    <template x-for="campaign in recentCampaigns" :key="campaign.id">
+                        <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                            <div class="flex-1 min-w-0">
+                                <p class="text-sm font-medium text-gray-900 truncate" x-text="campaign.name"></p>
+                                <p class="text-sm text-gray-500">
+                                    <span x-text="campaign.template_name"></span> • 
+                                    <span x-text="campaign.frequency"></span>
+                                </p>
+                            </div>
+                            <div class="flex items-center space-x-2">
+                                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium"
+                                      :class="campaign.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'"
+                                      x-text="campaign.status"></span>
+                                <a :href="'/admin/campaigns/' + campaign.id" class="text-blue-600 hover:text-blue-900">
+                                    <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                                    </svg>
+                                </a>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+                <div x-show="recentCampaigns.length === 0" class="text-center py-6">
+                    <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
+                    </svg>
+                    <h3 class="mt-2 text-sm font-medium text-gray-900">Nenhuma campanha</h3>
+                    <p class="mt-1 text-sm text-gray-500">Comece criando sua primeira campanha.</p>
+                    <div class="mt-6">
+                        <a href="/admin/campaigns/new" class="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700">
+                            Nova Campanha
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Execuções Recentes -->
+        <div class="bg-white shadow rounded-lg">
+            <div class="px-4 py-5 sm:p-6">
+                <h3 class="text-lg leading-6 font-medium text-gray-900 mb-4">Execuções Recentes</h3>
+                <div class="space-y-3" x-show="recentRuns.length > 0">
+                    <template x-for="run in recentRuns" :key="run.id">
+                        <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                            <div class="flex-1 min-w-0">
+                                <p class="text-sm font-medium text-gray-900 truncate" x-text="run.campaign_name"></p>
+                                <p class="text-sm text-gray-500">
+                                    <span x-text="run.phone_masked"></span> • 
+                                    <span x-text="formatDateTime(run.run_at)"></span>
+                                </p>
+                            </div>
+                            <div class="flex items-center">
+                                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium"
+                                      :class="run.status === 'ok' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'"
+                                      x-text="run.status === 'ok' ? 'Sucesso' : 'Erro'"></span>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+                <div x-show="recentRuns.length === 0" class="text-center py-6">
+                    <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                    </svg>
+                    <h3 class="mt-2 text-sm font-medium text-gray-900">Nenhuma execução</h3>
+                    <p class="mt-1 text-sm text-gray-500">As execuções aparecerão aqui quando as campanhas forem executadas.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function dashboard() {
+    return {
+        stats: {
+            total_campaigns: 0,
+            active_campaigns: 0,
+            total_patients: 0,
+            active_patients: 0,
+            messages_today: 0,
+            success_rate: 0,
+            next_execution: null,
+            next_campaign: null
+        },
+        recentCampaigns: [],
+        recentRuns: [],
+        
+        init() {
+            this.loadStats();
+            this.loadRecentActivity();
+            
+            // Auto-refresh every 30 seconds
+            setInterval(() => {
+                this.loadStats();
+                this.loadRecentActivity();
+            }, 30000);
+        },
+        
+        async loadStats() {
+            try {
+                const response = await fetch('/admin/api/dashboard/stats');
+                const data = await response.json();
+                if (data.success) {
+                    this.stats = data.stats;
+                }
+            } catch (error) {
+                console.error('Error loading stats:', error);
+            }
+        },
+        
+        async loadRecentActivity() {
+            try {
+                const response = await fetch('/admin/api/dashboard/recent');
+                const data = await response.json();
+                if (data.success) {
+                    this.recentCampaigns = data.recent_campaigns || [];
+                    this.recentRuns = data.recent_runs || [];
+                }
+            } catch (error) {
+                console.error('Error loading recent activity:', error);
+            }
+        },
+        
+        async testTemplate() {
+            if (!confirm('Enviar template de teste para o admin?')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch('/admin/api/test-template', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert('Template de teste enviado com sucesso!');
+                } else {
+                    alert('Erro ao enviar template: ' + (data.error || 'Erro desconhecido'));
+                }
+            } catch (error) {
+                console.error('Error testing template:', error);
+                alert('Erro ao enviar template de teste');
+            }
+        },
+        
+        formatDateTime(dateStr) {
+            if (!dateStr) return '-';
+            const date = new Date(dateStr);
+            return date.toLocaleString('pt-BR', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+        }
+    }
+}
+</script>
+{% endblock %}
+
