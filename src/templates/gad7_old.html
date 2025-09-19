@@ -105,7 +105,6 @@
             height: 100%;
             border-radius: 3px;
             transition: width 0.3s ease;
-            width: 0%;
         }
 
         .progress-text {
@@ -115,13 +114,13 @@
             margin-bottom: 20px;
         }
 
-        .step {
+        .question-container {
             display: none;
+            animation: fadeIn 0.5s ease-in;
         }
 
-        .step.active {
+        .question-container.active {
             display: block;
-            animation: fadeIn 0.5s ease-in;
         }
 
         @keyframes fadeIn {
@@ -198,7 +197,7 @@
             color: white;
         }
 
-        .btn-primary:hover:not(:disabled) {
+        .btn-primary:hover {
             transform: translateY(-2px);
             box-shadow: 0 6px 20px rgba(0, 188, 212, 0.3);
         }
@@ -216,32 +215,7 @@
         .btn:disabled {
             opacity: 0.5;
             cursor: not-allowed;
-        }
-
-        .form-group {
-            margin-bottom: 20px;
-        }
-
-        .form-group label {
-            display: block;
-            margin-bottom: 8px;
-            color: #333;
-            font-weight: 500;
-        }
-
-        .form-group input {
-            width: 100%;
-            padding: 12px 15px;
-            border: 2px solid #e9ecef;
-            border-radius: 8px;
-            font-size: 16px;
-            transition: border-color 0.3s ease;
-        }
-
-        .form-group input:focus {
-            outline: none;
-            border-color: #00BCD4;
-            box-shadow: 0 0 0 3px rgba(0, 188, 212, 0.1);
+            transform: none !important;
         }
 
         .consent-container {
@@ -268,6 +242,32 @@
         .consent-checkbox input {
             margin-right: 10px;
             transform: scale(1.2);
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: #333;
+            font-weight: 500;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 12px 15px;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s ease;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: #00BCD4;
+            box-shadow: 0 0 0 3px rgba(0, 188, 212, 0.1);
         }
 
         .result-container {
@@ -337,8 +337,8 @@
         </div>
 
         <div class="content">
-            <!-- Etapa 1: Cadastro -->
-            <div id="step-registration" class="step active">
+            <!-- Cadastro Inicial -->
+            <div id="registration" class="question-container active">
                 <div class="question-number">IDENTIFICAÇÃO</div>
                 <div class="question">Por favor, informe seus dados para iniciarmos:</div>
                 
@@ -375,42 +375,45 @@
                 </div>
             </div>
 
-            <!-- Etapa 2: Perguntas -->
-            <div id="step-questions" class="step">
+            <!-- Perguntas do GAD-7 -->
+            <div id="questions" style="display: none;">
                 <div class="progress-bar">
                     <div class="progress-fill" id="progressFill"></div>
                 </div>
                 <div class="progress-text" id="progressText">Pergunta 1 de 7</div>
 
-                <div class="question-number" id="questionNumber">PERGUNTA 1</div>
-                <div class="question" id="questionText">
-                    Nas últimas 2 semanas, com que frequência você percebeu-se incomodado por:<br><br>
-                    <strong>Sentir-se nervoso, ansioso ou muito tenso?</strong>
-                </div>
-                
-                <div class="options">
-                    <div class="option" onclick="selectOption(0)" data-value="0">
-                        <strong>0 - Nenhuma vez</strong>
+                <!-- Pergunta Template -->
+                <div class="question-container" id="questionTemplate">
+                    <div class="question-number" id="questionNumber">PERGUNTA 1</div>
+                    <div class="question" id="questionText">
+                        Nas últimas 2 semanas, com que frequência você percebeu-se incomodado por:<br><br>
+                        <strong>Sentir-se nervoso, ansioso ou muito tenso?</strong>
                     </div>
-                    <div class="option" onclick="selectOption(1)" data-value="1">
-                        <strong>1 - Vários dias</strong>
+                    
+                    <div class="options">
+                        <div class="option" onclick="selectOption(0)" data-value="0">
+                            <strong>0 - Nenhuma vez</strong>
+                        </div>
+                        <div class="option" onclick="selectOption(1)" data-value="1">
+                            <strong>1 - Vários dias</strong>
+                        </div>
+                        <div class="option" onclick="selectOption(2)" data-value="2">
+                            <strong>2 - Mais da metade dos dias</strong>
+                        </div>
+                        <div class="option" onclick="selectOption(3)" data-value="3">
+                            <strong>3 - Quase todos os dias</strong>
+                        </div>
                     </div>
-                    <div class="option" onclick="selectOption(2)" data-value="2">
-                        <strong>2 - Mais da metade dos dias</strong>
-                    </div>
-                    <div class="option" onclick="selectOption(3)" data-value="3">
-                        <strong>3 - Quase todos os dias</strong>
-                    </div>
-                </div>
 
-                <div class="navigation">
-                    <button class="btn btn-secondary" onclick="previousQuestion()" id="prevBtn" style="display: none;">Anterior</button>
-                    <button class="btn btn-primary" onclick="nextQuestion()" id="nextBtn" disabled>Próxima</button>
+                    <div class="navigation">
+                        <button class="btn btn-secondary" onclick="previousQuestion()" id="prevBtn" style="display: none;">Anterior</button>
+                        <button class="btn btn-primary" onclick="nextQuestion()" id="nextBtn" disabled>Próxima</button>
+                    </div>
                 </div>
             </div>
 
-            <!-- Etapa 3: Resultado -->
-            <div id="step-result" class="step">
+            <!-- Resultado -->
+            <div id="result" class="question-container">
                 <div class="result-container">
                     <div class="result-score" id="resultScore">0/21</div>
                     <div class="result-category" id="resultCategory">Ansiedade Mínima</div>
@@ -424,8 +427,6 @@
     </div>
 
     <script>
-        console.log('Script carregado!');
-        
         const questions = [
             "Sentir-se nervoso, ansioso ou muito tenso?",
             "Não conseguir parar ou controlar as preocupações?",
@@ -442,53 +443,23 @@
 
         // Validação do formulário de cadastro
         document.addEventListener('DOMContentLoaded', function() {
-            console.log('DOM carregado!');
-            
             const inputs = ['firstName', 'lastName', 'birthDate'];
             const consent = document.getElementById('consent');
             const startBtn = document.getElementById('startBtn');
 
             function validateForm() {
-                const allFilled = inputs.every(id => {
-                    const element = document.getElementById(id);
-                    return element && element.value.trim() !== '';
-                });
-                const consentChecked = consent && consent.checked;
-                if (startBtn) {
-                    startBtn.disabled = !(allFilled && consentChecked);
-                }
+                const allFilled = inputs.every(id => document.getElementById(id).value.trim() !== '');
+                const consentChecked = consent.checked;
+                startBtn.disabled = !(allFilled && consentChecked);
             }
 
             inputs.forEach(id => {
-                const element = document.getElementById(id);
-                if (element) {
-                    element.addEventListener('input', validateForm);
-                }
+                document.getElementById(id).addEventListener('input', validateForm);
             });
-            
-            if (consent) {
-                consent.addEventListener('change', validateForm);
-            }
+            consent.addEventListener('change', validateForm);
         });
 
-        function showStep(stepId) {
-            console.log('Mostrando step:', stepId);
-            
-            // Esconder todas as etapas
-            document.querySelectorAll('.step').forEach(step => {
-                step.classList.remove('active');
-            });
-            
-            // Mostrar etapa específica
-            const targetStep = document.getElementById(stepId);
-            if (targetStep) {
-                targetStep.classList.add('active');
-            }
-        }
-
         function startQuestionnaire() {
-            console.log('Iniciando questionário...');
-            
             // Coletar dados do paciente
             patientData = {
                 firstName: document.getElementById('firstName').value,
@@ -496,27 +467,20 @@
                 birthDate: document.getElementById('birthDate').value
             };
 
-            console.log('Dados do paciente:', patientData);
-
-            // Mostrar etapa de perguntas
-            showStep('step-questions');
+            // Esconder cadastro e mostrar questionário
+            document.getElementById('registration').style.display = 'none';
+            document.getElementById('questions').style.display = 'block';
+            
             updateQuestion();
         }
 
         function updateQuestion() {
-            console.log('Atualizando pergunta:', currentQuestion);
-            
             const questionText = document.getElementById('questionText');
             const questionNumber = document.getElementById('questionNumber');
             const progressFill = document.getElementById('progressFill');
             const progressText = document.getElementById('progressText');
             const prevBtn = document.getElementById('prevBtn');
             const nextBtn = document.getElementById('nextBtn');
-
-            if (!questionText || !questionNumber) {
-                console.error('Elementos não encontrados!');
-                return;
-            }
 
             // Atualizar conteúdo
             questionNumber.textContent = `PERGUNTA ${currentQuestion + 1}`;
@@ -527,21 +491,13 @@
 
             // Atualizar progresso
             const progress = ((currentQuestion + 1) / questions.length) * 100;
-            if (progressFill) {
-                progressFill.style.width = progress + '%';
-            }
-            if (progressText) {
-                progressText.textContent = `Pergunta ${currentQuestion + 1} de ${questions.length}`;
-            }
+            progressFill.style.width = progress + '%';
+            progressText.textContent = `Pergunta ${currentQuestion + 1} de ${questions.length}`;
 
             // Atualizar botões
-            if (prevBtn) {
-                prevBtn.style.display = currentQuestion > 0 ? 'block' : 'none';
-            }
-            if (nextBtn) {
-                nextBtn.textContent = currentQuestion === questions.length - 1 ? 'Finalizar' : 'Próxima';
-                nextBtn.disabled = answers[currentQuestion] === undefined;
-            }
+            prevBtn.style.display = currentQuestion > 0 ? 'block' : 'none';
+            nextBtn.textContent = currentQuestion === questions.length - 1 ? 'Finalizar' : 'Próxima';
+            nextBtn.disabled = answers[currentQuestion] === undefined;
 
             // Limpar seleções
             document.querySelectorAll('.option').forEach(option => {
@@ -558,30 +514,19 @@
         }
 
         function selectOption(value) {
-            console.log('Opção selecionada:', value);
-            
             answers[currentQuestion] = value;
             
             // Atualizar visual
             document.querySelectorAll('.option').forEach(option => {
                 option.classList.remove('selected');
             });
-            
-            const selectedOption = document.querySelector(`[data-value="${value}"]`);
-            if (selectedOption) {
-                selectedOption.classList.add('selected');
-            }
+            document.querySelector(`[data-value="${value}"]`).classList.add('selected');
             
             // Habilitar botão próxima
-            const nextBtn = document.getElementById('nextBtn');
-            if (nextBtn) {
-                nextBtn.disabled = false;
-            }
+            document.getElementById('nextBtn').disabled = false;
         }
 
         function nextQuestion() {
-            console.log('Próxima pergunta...');
-            
             if (currentQuestion < questions.length - 1) {
                 currentQuestion++;
                 updateQuestion();
@@ -591,8 +536,6 @@
         }
 
         function previousQuestion() {
-            console.log('Pergunta anterior...');
-            
             if (currentQuestion > 0) {
                 currentQuestion--;
                 updateQuestion();
@@ -600,8 +543,6 @@
         }
 
         function showResult() {
-            console.log('Mostrando resultado...');
-            
             // Calcular pontuação
             const totalScore = answers.reduce((sum, answer) => sum + answer, 0);
             
@@ -622,20 +563,16 @@
             }
 
             // Atualizar resultado
-            const resultScore = document.getElementById('resultScore');
-            const resultCategory = document.getElementById('resultCategory');
-            const resultInterpretation = document.getElementById('resultInterpretation');
-            const resultDate = document.getElementById('resultDate');
-
-            if (resultScore) resultScore.textContent = `${totalScore}/21`;
-            if (resultCategory) resultCategory.textContent = category;
-            if (resultInterpretation) resultInterpretation.textContent = interpretation;
-            if (resultDate) resultDate.textContent = `Avaliação realizada em ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')}`;
+            document.getElementById('resultScore').textContent = `${totalScore}/21`;
+            document.getElementById('resultCategory').textContent = category;
+            document.getElementById('resultInterpretation').textContent = interpretation;
+            document.getElementById('resultDate').textContent = `Avaliação realizada em ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')}`;
 
             // Mostrar resultado
-            showStep('step-result');
+            document.getElementById('questions').style.display = 'none';
+            document.getElementById('result').style.display = 'block';
 
-            // Salvar resultado
+            // Salvar resultado (aqui você enviaria para o backend)
             saveResult({
                 patient: patientData,
                 answers: answers,
@@ -646,23 +583,11 @@
         }
 
         function saveResult(resultData) {
-            console.log('Salvando resultado:', resultData);
+            // Aqui você enviaria os dados para o backend
+            console.log('Resultado salvo:', resultData);
             
-            // Enviar para o backend
-            fetch('/api/save-gad7', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(resultData)
-            })
-            .then(response => response.json())
-            .then(data => {
-                console.log('Resultado salvo:', data);
-            })
-            .catch(error => {
-                console.error('Erro ao salvar:', error);
-            });
+            // Por enquanto, apenas log no console
+            // Implementar chamada AJAX para salvar no banco de dados
         }
     </script>
 </body>
