@@ -276,6 +276,42 @@ def create_patient_api():
         app.logger.error(f"❌ Erro ao cadastrar paciente: {str(e)}")
         return jsonify({'error': f'Erro interno: {str(e)}'}), 500
 
+
+@app.route('/admin/api/create-tables', methods=['POST'])
+def create_tables():
+    """Força criação de todas as tabelas do banco"""
+    try:
+        # Verifica autenticação admin
+        admin_token = request.headers.get('X-Admin-Token')
+        if admin_token != 'admin123456':
+            return jsonify({"error": "Unauthorized", "success": False}), 401
+        
+        # Cria todas as tabelas
+        with app.app_context():
+            db.create_all()
+        
+        # Verifica se as tabelas foram criadas
+        tables_created = []
+        inspector = db.inspect(db.engine)
+        
+        expected_tables = ['patients', 'responses', 'schedules']
+        for table_name in expected_tables:
+            if inspector.has_table(table_name):
+                tables_created.append(table_name)
+        
+        return jsonify({
+            "success": True,
+            "message": "Tabelas criadas com sucesso",
+            "tables_created": tables_created,
+            "total_tables": len(tables_created)
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            "error": f"Erro ao criar tabelas: {str(e)}",
+            "success": False
+        }), 500
+
 if __name__ == "__main__":
     # Validar ambiente
     validate_environment()
