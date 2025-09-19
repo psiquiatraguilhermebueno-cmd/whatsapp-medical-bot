@@ -3,267 +3,167 @@
 {% block title %}Novo Paciente{% endblock %}
 
 {% block content %}
-<div class="container-fluid">
-    <div class="row">
-        <div class="col-md-8">
-            <div class="card">
-                <div class="card-header">
-                    <h5 class="card-title mb-0">
-                        <i class="fas fa-user-plus me-2"></i>
-                        Cadastrar Novo Paciente
-                    </h5>
-                </div>
-                <div class="card-body">
-                    <form id="patientForm">
-                        <!-- Dados Básicos -->
-                        <div class="row mb-3">
-                            <div class="col-md-6">
-                                <label for="name" class="form-label">Nome Completo *</label>
-                                <input type="text" class="form-control" id="name" name="name" required>
-                            </div>
-                            <div class="col-md-6">
-                                <label for="phone" class="form-label">Telefone *</label>
-                                <input type="tel" class="form-control" id="phone" name="phone" 
-                                       placeholder="(14) 99999-9999" required>
-                                <div class="form-text">Formato: (DD) 9XXXX-XXXX</div>
-                            </div>
-                        </div>
-
-                        <div class="row mb-3">
-                            <div class="col-md-6">
-                                <label for="email" class="form-label">E-mail</label>
-                                <input type="email" class="form-control" id="email" name="email">
-                            </div>
-                            <div class="col-md-3">
-                                <label for="birth_date" class="form-label">Data de Nascimento</label>
-                                <input type="date" class="form-control" id="birth_date" name="birth_date">
-                            </div>
-                            <div class="col-md-3">
-                                <label for="gender" class="form-label">Gênero</label>
-                                <select class="form-select" id="gender" name="gender">
-                                    <option value="">Selecionar</option>
-                                    <option value="M">Masculino</option>
-                                    <option value="F">Feminino</option>
-                                    <option value="O">Outro</option>
-                                </select>
-                            </div>
-                        </div>
-
-                        <!-- Protocolos -->
-                        <div class="card mb-3">
-                            <div class="card-header">
-                                <h6 class="mb-0">Protocolos de Tratamento</h6>
-                            </div>
-                            <div class="card-body">
-                                <!-- u-ETG -->
-                                <div class="row mb-3">
-                                    <div class="col-md-3">
-                                        <div class="form-check">
-                                            <input class="form-check-input" type="checkbox" id="uetg_enabled" name="uetg_enabled">
-                                            <label class="form-check-label" for="uetg_enabled">
-                                                <strong>u-ETG</strong>
-                                            </label>
-                                        </div>
-                                    </div>
-                                    <div class="col-md-3">
-                                        <label for="uetg_frequency" class="form-label">Frequência</label>
-                                        <select class="form-select" id="uetg_frequency" name="uetg_frequency">
-                                            <option value="random">Aleatório</option>
-                                            <option value="daily">Diário</option>
-                                            <option value="weekly">Semanal</option>
-                                        </select>
-                                    </div>
-                                    <div class="col-md-3">
-                                        <label for="uetg_time" class="form-label">Horário</label>
-                                        <input type="time" class="form-control" id="uetg_time" name="uetg_time" value="07:30">
-                                    </div>
-                                    <div class="col-md-3">
-                                        <label for="uetg_days" class="form-label">Dias da Semana</label>
-                                        <select class="form-select" id="uetg_days" name="uetg_days" multiple>
-                                            <option value="monday">Segunda</option>
-                                            <option value="tuesday">Terça</option>
-                                            <option value="wednesday">Quarta</option>
-                                            <option value="thursday">Quinta</option>
-                                            <option value="friday">Sexta</option>
-                                            <option value="saturday">Sábado</option>
-                                            <option value="sunday">Domingo</option>
-                                        </select>
-                                    </div>
-                                </div>
-
-                                <!-- GAD-7 -->
-                                <div class="row mb-3">
-                                    <div class="col-md-3">
-                                        <div class="form-check">
-                                            <input class="form-check-input" type="checkbox" id="gad7_enabled" name="gad7_enabled">
-                                            <label class="form-check-label" for="gad7_enabled">
-                                                <strong>GAD-7</strong>
-                                            </label>
-                                        </div>
-                                    </div>
-                                    <div class="col-md-3">
-                                        <label for="gad7_frequency" class="form-label">Frequência</label>
-                                        <select class="form-select" id="gad7_frequency" name="gad7_frequency">
-                                            <option value="weekly">Semanal</option>
-                                            <option value="biweekly">Quinzenal</option>
-                                            <option value="monthly">Mensal</option>
-                                        </select>
-                                    </div>
-                                    <div class="col-md-3">
-                                        <label for="gad7_time" class="form-label">Horário</label>
-                                        <input type="time" class="form-control" id="gad7_time" name="gad7_time" value="09:00">
-                                    </div>
-                                    <div class="col-md-3">
-                                        <label for="gad7_day" class="form-label">Dia da Semana</label>
-                                        <select class="form-select" id="gad7_day" name="gad7_day">
-                                            <option value="monday">Segunda</option>
-                                            <option value="tuesday">Terça</option>
-                                            <option value="wednesday">Quarta</option>
-                                            <option value="thursday">Quinta</option>
-                                            <option value="friday">Sexta</option>
-                                            <option value="saturday">Sábado</option>
-                                            <option value="sunday">Domingo</option>
-                                        </select>
-                                    </div>
-                                </div>
-
-                                <!-- PHQ-9 -->
-                                <div class="row mb-3">
-                                    <div class="col-md-3">
-                                        <div class="form-check">
-                                            <input class="form-check-input" type="checkbox" id="phq9_enabled" name="phq9_enabled">
-                                            <label class="form-check-label" for="phq9_enabled">
-                                                <strong>PHQ-9</strong>
-                                            </label>
-                                        </div>
-                                    </div>
-                                    <div class="col-md-3">
-                                        <label for="phq9_frequency" class="form-label">Frequência</label>
-                                        <select class="form-select" id="phq9_frequency" name="phq9_frequency">
-                                            <option value="weekly">Semanal</option>
-                                            <option value="biweekly">Quinzenal</option>
-                                            <option value="monthly">Mensal</option>
-                                        </select>
-                                    </div>
-                                    <div class="col-md-3">
-                                        <label for="phq9_time" class="form-label">Horário</label>
-                                        <input type="time" class="form-control" id="phq9_time" name="phq9_time" value="10:00">
-                                    </div>
-                                    <div class="col-md-3">
-                                        <label for="phq9_day" class="form-label">Dia da Semana</label>
-                                        <select class="form-select" id="phq9_day" name="phq9_day">
-                                            <option value="monday">Segunda</option>
-                                            <option value="tuesday">Terça</option>
-                                            <option value="wednesday">Quarta</option>
-                                            <option value="thursday">Quinta</option>
-                                            <option value="friday">Sexta</option>
-                                            <option value="saturday">Sábado</option>
-                                            <option value="sunday">Domingo</option>
-                                        </select>
-                                    </div>
-                                </div>
-
-                                <!-- ASRS-18 -->
-                                <div class="row mb-3">
-                                    <div class="col-md-3">
-                                        <div class="form-check">
-                                            <input class="form-check-input" type="checkbox" id="asrs18_enabled" name="asrs18_enabled">
-                                            <label class="form-check-label" for="asrs18_enabled">
-                                                <strong>ASRS-18</strong>
-                                            </label>
-                                        </div>
-                                    </div>
-                                    <div class="col-md-3">
-                                        <label for="asrs18_frequency" class="form-label">Frequência</label>
-                                        <select class="form-select" id="asrs18_frequency" name="asrs18_frequency">
-                                            <option value="monthly">Mensal</option>
-                                            <option value="bimonthly">Bimestral</option>
-                                            <option value="quarterly">Trimestral</option>
-                                        </select>
-                                    </div>
-                                    <div class="col-md-3">
-                                        <label for="asrs18_time" class="form-label">Horário</label>
-                                        <input type="time" class="form-control" id="asrs18_time" name="asrs18_time" value="11:00">
-                                    </div>
-                                    <div class="col-md-3">
-                                        <label for="asrs18_day" class="form-label">Dia da Semana</label>
-                                        <select class="form-select" id="asrs18_day" name="asrs18_day">
-                                            <option value="monday">Segunda</option>
-                                            <option value="tuesday">Terça</option>
-                                            <option value="wednesday">Quarta</option>
-                                            <option value="thursday">Quinta</option>
-                                            <option value="friday">Sexta</option>
-                                            <option value="saturday">Sábado</option>
-                                            <option value="sunday">Domingo</option>
-                                        </select>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Configurações Adicionais -->
-                        <div class="row mb-3">
-                            <div class="col-md-6">
-                                <label for="priority" class="form-label">Prioridade</label>
-                                <select class="form-select" id="priority" name="priority">
-                                    <option value="normal">Normal</option>
-                                    <option value="high">Alta</option>
-                                    <option value="urgent">Urgente</option>
-                                </select>
-                            </div>
-                            <div class="col-md-6">
-                                <div class="form-check mt-4">
-                                    <input class="form-check-input" type="checkbox" id="active" name="active" checked>
-                                    <label class="form-check-label" for="active">
-                                        Paciente Ativo
-                                    </label>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="mb-3">
-                            <label for="notes" class="form-label">Observações</label>
-                            <textarea class="form-control" id="notes" name="notes" rows="3"></textarea>
-                        </div>
-
-                        <!-- Botões -->
-                        <div class="d-flex justify-content-between">
-                            <a href="{{ url_for('admin.patients') }}" class="btn btn-secondary">
-                                <i class="fas fa-arrow-left me-2"></i>Voltar
-                            </a>
-                            <button type="submit" class="btn btn-primary" id="submitBtn">
-                                <i class="fas fa-save me-2"></i>Cadastrar Paciente
-                            </button>
-                        </div>
-                    </form>
-                </div>
-            </div>
+<div class="max-w-4xl mx-auto p-6">
+    <div class="bg-white shadow-lg rounded-lg">
+        <div class="px-6 py-4 border-b border-gray-200">
+            <h2 class="text-2xl font-bold text-gray-900">Cadastrar Novo Paciente</h2>
+            <p class="text-gray-600 mt-1">Preencha os dados do paciente para cadastro no sistema</p>
         </div>
-
-        <!-- Sidebar com Informações -->
-        <div class="col-md-4">
-            <div class="card">
-                <div class="card-header">
-                    <h6 class="mb-0">Informações</h6>
-                </div>
-                <div class="card-body">
-                    <div class="alert alert-info">
-                        <i class="fas fa-info-circle me-2"></i>
-                        <strong>Protocolos Disponíveis:</strong>
-                        <ul class="mb-0 mt-2">
-                            <li><strong>u-ETG:</strong> Monitoramento de uso de álcool</li>
-                            <li><strong>GAD-7:</strong> Escala de ansiedade generalizada</li>
-                            <li><strong>PHQ-9:</strong> Escala de depressão</li>
-                            <li><strong>ASRS-18:</strong> Escala de TDAH</li>
-                        </ul>
+        
+        <div class="p-6">
+            <form id="patientForm" class="space-y-6">
+                <!-- Dados Básicos -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <label for="name" class="block text-sm font-medium text-gray-700 mb-2">Nome Completo *</label>
+                        <input type="text" id="name" name="name" required
+                               class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
                     </div>
                     
-                    <div class="alert alert-warning">
-                        <i class="fas fa-exclamation-triangle me-2"></i>
-                        <strong>Importante:</strong> Certifique-se de que o número de telefone está correto, pois será usado para envio das mensagens WhatsApp.
+                    <div>
+                        <label for="phone" class="block text-sm font-medium text-gray-700 mb-2">Telefone *</label>
+                        <input type="tel" id="phone" name="phone" required placeholder="(14) 99999-9999"
+                               class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                        <p class="text-xs text-gray-500 mt-1">Formato: (DD) 9XXXX-XXXX</p>
                     </div>
                 </div>
-            </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div>
+                        <label for="email" class="block text-sm font-medium text-gray-700 mb-2">E-mail</label>
+                        <input type="email" id="email" name="email"
+                               class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                    </div>
+                    
+                    <div>
+                        <label for="birth_date" class="block text-sm font-medium text-gray-700 mb-2">Data de Nascimento</label>
+                        <input type="date" id="birth_date" name="birth_date"
+                               class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                    </div>
+                    
+                    <div>
+                        <label for="gender" class="block text-sm font-medium text-gray-700 mb-2">Gênero</label>
+                        <select id="gender" name="gender"
+                                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                            <option value="">Selecionar</option>
+                            <option value="M">Masculino</option>
+                            <option value="F">Feminino</option>
+                            <option value="O">Outro</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Protocolos -->
+                <div class="bg-gray-50 p-4 rounded-lg">
+                    <h3 class="text-lg font-medium text-gray-900 mb-4">Protocolos de Tratamento</h3>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <!-- u-ETG -->
+                        <div class="bg-white p-4 rounded border">
+                            <div class="flex items-center mb-3">
+                                <input type="checkbox" id="uetg_enabled" name="uetg_enabled" class="mr-2">
+                                <label for="uetg_enabled" class="font-medium text-gray-900">u-ETG</label>
+                            </div>
+                            <div class="space-y-2">
+                                <input type="time" id="uetg_time" name="uetg_time" value="07:30"
+                                       class="w-full px-2 py-1 text-sm border border-gray-300 rounded">
+                                <select id="uetg_frequency" name="uetg_frequency"
+                                        class="w-full px-2 py-1 text-sm border border-gray-300 rounded">
+                                    <option value="random">Aleatório</option>
+                                    <option value="daily">Diário</option>
+                                    <option value="weekly">Semanal</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- GAD-7 -->
+                        <div class="bg-white p-4 rounded border">
+                            <div class="flex items-center mb-3">
+                                <input type="checkbox" id="gad7_enabled" name="gad7_enabled" class="mr-2">
+                                <label for="gad7_enabled" class="font-medium text-gray-900">GAD-7</label>
+                            </div>
+                            <div class="space-y-2">
+                                <input type="time" id="gad7_time" name="gad7_time" value="09:00"
+                                       class="w-full px-2 py-1 text-sm border border-gray-300 rounded">
+                                <select id="gad7_frequency" name="gad7_frequency"
+                                        class="w-full px-2 py-1 text-sm border border-gray-300 rounded">
+                                    <option value="weekly">Semanal</option>
+                                    <option value="monthly">Mensal</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- PHQ-9 -->
+                        <div class="bg-white p-4 rounded border">
+                            <div class="flex items-center mb-3">
+                                <input type="checkbox" id="phq9_enabled" name="phq9_enabled" class="mr-2">
+                                <label for="phq9_enabled" class="font-medium text-gray-900">PHQ-9</label>
+                            </div>
+                            <div class="space-y-2">
+                                <input type="time" id="phq9_time" name="phq9_time" value="10:00"
+                                       class="w-full px-2 py-1 text-sm border border-gray-300 rounded">
+                                <select id="phq9_frequency" name="phq9_frequency"
+                                        class="w-full px-2 py-1 text-sm border border-gray-300 rounded">
+                                    <option value="weekly">Semanal</option>
+                                    <option value="monthly">Mensal</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- ASRS-18 -->
+                        <div class="bg-white p-4 rounded border">
+                            <div class="flex items-center mb-3">
+                                <input type="checkbox" id="asrs18_enabled" name="asrs18_enabled" class="mr-2">
+                                <label for="asrs18_enabled" class="font-medium text-gray-900">ASRS-18</label>
+                            </div>
+                            <div class="space-y-2">
+                                <input type="time" id="asrs18_time" name="asrs18_time" value="11:00"
+                                       class="w-full px-2 py-1 text-sm border border-gray-300 rounded">
+                                <select id="asrs18_frequency" name="asrs18_frequency"
+                                        class="w-full px-2 py-1 text-sm border border-gray-300 rounded">
+                                    <option value="monthly">Mensal</option>
+                                    <option value="quarterly">Trimestral</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Configurações Adicionais -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <label for="priority" class="block text-sm font-medium text-gray-700 mb-2">Prioridade</label>
+                        <select id="priority" name="priority"
+                                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                            <option value="normal">Normal</option>
+                            <option value="high">Alta</option>
+                            <option value="urgent">Urgente</option>
+                        </select>
+                    </div>
+                    
+                    <div class="flex items-center">
+                        <input type="checkbox" id="active" name="active" checked class="mr-2">
+                        <label for="active" class="text-sm font-medium text-gray-700">Paciente Ativo</label>
+                    </div>
+                </div>
+
+                <div>
+                    <label for="notes" class="block text-sm font-medium text-gray-700 mb-2">Observações</label>
+                    <textarea id="notes" name="notes" rows="3"
+                              class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"></textarea>
+                </div>
+
+                <!-- Botões -->
+                <div class="flex justify-between pt-6 border-t border-gray-200">
+                    <a href="/admin/patients" class="px-4 py-2 text-gray-600 bg-gray-100 rounded-md hover:bg-gray-200 transition-colors">
+                        ← Voltar
+                    </a>
+                    <button type="submit" id="submitBtn"
+                            class="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors">
+                        Cadastrar Paciente
+                    </button>
+                </div>
+            </form>
         </div>
     </div>
 </div>
@@ -292,7 +192,7 @@ document.addEventListener('DOMContentLoaded', function() {
         e.preventDefault();
         
         submitBtn.disabled = true;
-        submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Cadastrando...';
+        submitBtn.textContent = 'Cadastrando...';
         
         // Coletar dados do formulário
         const formData = new FormData(form);
@@ -315,8 +215,7 @@ document.addEventListener('DOMContentLoaded', function() {
             data.protocols.uetg = {
                 enabled: true,
                 frequency: formData.get('uetg_frequency'),
-                time: formData.get('uetg_time'),
-                days: Array.from(document.getElementById('uetg_days').selectedOptions).map(opt => opt.value)
+                time: formData.get('uetg_time')
             };
         }
         
@@ -324,8 +223,7 @@ document.addEventListener('DOMContentLoaded', function() {
             data.protocols.gad7 = {
                 enabled: true,
                 frequency: formData.get('gad7_frequency'),
-                time: formData.get('gad7_time'),
-                day: formData.get('gad7_day')
+                time: formData.get('gad7_time')
             };
         }
         
@@ -333,8 +231,7 @@ document.addEventListener('DOMContentLoaded', function() {
             data.protocols.phq9 = {
                 enabled: true,
                 frequency: formData.get('phq9_frequency'),
-                time: formData.get('phq9_time'),
-                day: formData.get('phq9_day')
+                time: formData.get('phq9_time')
             };
         }
         
@@ -342,8 +239,7 @@ document.addEventListener('DOMContentLoaded', function() {
             data.protocols.asrs18 = {
                 enabled: true,
                 frequency: formData.get('asrs18_frequency'),
-                time: formData.get('asrs18_time'),
-                day: formData.get('asrs18_day')
+                time: formData.get('asrs18_time')
             };
         }
         
@@ -351,8 +247,7 @@ document.addEventListener('DOMContentLoaded', function() {
         fetch('/admin/api/patients', {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json',
-                'X-Admin-Token': getCookie('admin_token') || sessionStorage.getItem('admin_token')
+                'Content-Type': 'application/json'
             },
             body: JSON.stringify(data)
         })
@@ -371,15 +266,9 @@ document.addEventListener('DOMContentLoaded', function() {
         })
         .finally(() => {
             submitBtn.disabled = false;
-            submitBtn.innerHTML = '<i class="fas fa-save me-2"></i>Cadastrar Paciente';
+            submitBtn.textContent = 'Cadastrar Paciente';
         });
     });
-    
-    function getCookie(name) {
-        const value = `; ${document.cookie}`;
-        const parts = value.split(`; ${name}=`);
-        if (parts.length === 2) return parts.pop().split(';').shift();
-    }
 });
 </script>
 {% endblock %}
