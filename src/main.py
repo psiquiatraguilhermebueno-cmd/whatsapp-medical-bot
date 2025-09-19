@@ -34,21 +34,23 @@ RESPONSE_MEANINGS = {
 }
 
 def send_whatsapp_message(phone_number, message_text):
-    """Envia mensagem de texto via WhatsApp com logs detalhados"""
+    """Envia mensagem de texto via WhatsApp com credenciais hardcoded"""
     print(f"🔄 Attempting to send message to {phone_number}")
     print(f"📝 Message length: {len(message_text)} characters")
     
-    if not WHATSAPP_ACCESS_TOKEN or not WHATSAPP_PHONE_NUMBER_ID:
+    # Credenciais hardcoded para garantir funcionamento
+    token = "EAANTZCXB0csgBPft9y6ZBIdeTVM5PVLr2ZBZAlTGd49ezcAklZCF4DDZC6r6NQ4nrDREkNnC6iEebI7YxciceIMF9BD9Cwp8OqVpBYxeZB2gAZADsVQZCsDbDZAlaPZC3iByj0ZAn2eaSrmjPaQPqZBX6UJZAK6Hd8MuXGoKVrLFPooE7so4G1w2wYNaxJYn1SgQ6RnwZDZD"
+    phone_id = "797803706754193"
+    
+    if not token or not phone_id:
         print("❌ WhatsApp credentials not configured")
-        print(f"Token exists: {bool(WHATSAPP_ACCESS_TOKEN)}")
-        print(f"Phone ID exists: {bool(WHATSAPP_PHONE_NUMBER_ID)}")
         return False
     
-    url = f"https://graph.facebook.com/v18.0/{WHATSAPP_PHONE_NUMBER_ID}/messages"
+    url = f"https://graph.facebook.com/v18.0/{phone_id}/messages"
     print(f"🌐 API URL: {url}")
     
     headers = {
-        'Authorization': f'Bearer {WHATSAPP_ACCESS_TOKEN[:20]}...',  # Log partial token
+        'Authorization': f'Bearer {token}',
         'Content-Type': 'application/json'
     }
     
@@ -68,7 +70,6 @@ def send_whatsapp_message(phone_number, message_text):
             response = requests.post(url, headers=headers, json=data, timeout=30)
             
             print(f"📊 Response status: {response.status_code}")
-            print(f"📝 Response headers: {dict(response.headers)}")
             print(f"📄 Response body: {response.text}")
             
             if response.status_code == 200:
