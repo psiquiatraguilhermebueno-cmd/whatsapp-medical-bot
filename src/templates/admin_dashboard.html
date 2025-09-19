@@ -516,8 +516,8 @@
         }
 
         function viewDetails(questionnaireId) {
-            // Implementar modal ou página de detalhes
-            alert(`Ver detalhes do questionário ID: ${questionnaireId}`);
+            // Redirecionar para página de detalhes
+            window.location.href = `/admin/questionnaire/${questionnaireId}?id=${questionnaireId}`;
         }
 
         // Filtros

@@ -725,6 +725,54 @@ def patient_results(patient_id):
         print(f"💥 Error getting patient results: {e}")
         return jsonify({"error": str(e)}), 500
 
+@app.route("/admin/questionnaire/<int:questionnaire_id>")
+def questionnaire_details_page(questionnaire_id):
+    """Página de detalhes do questionário"""
+    return render_template('questionnaire_details.html')
+
+@app.route("/api/admin/questionnaire/<int:questionnaire_id>")
+def questionnaire_details_api(questionnaire_id):
+    """API para detalhes do questionário"""
+    try:
+        from database import db
+        import sqlite3
+        
+        conn = sqlite3.connect(db.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT q.*, p.first_name, p.last_name, p.birth_date, p.phone_number
+            FROM questionnaires q
+            JOIN patients p ON q.patient_id = p.id
+            WHERE q.id = ?
+        ''', (questionnaire_id,))
+        
+        result = cursor.fetchone()
+        conn.close()
+        
+        if not result:
+            return jsonify({"error": "Questionário não encontrado"}), 404
+        
+        return jsonify({
+            'id': result[0],
+            'patient_id': result[1],
+            'questionnaire_type': result[2],
+            'answers': result[3],
+            'total_score': result[4],
+            'category': result[5],
+            'interpretation': result[6],
+            'completed_at': result[7],
+            'token': result[8],
+            'first_name': result[9],
+            'last_name': result[10],
+            'birth_date': result[11],
+            'phone_number': result[12]
+        })
+        
+    except Exception as e:
+        print(f"💥 Error getting questionnaire details: {e}")
+        return jsonify({"error": str(e)}), 500
+
 
 @app.route("/questionario/gad7/<token>")
 def gad7_questionnaire(token):
