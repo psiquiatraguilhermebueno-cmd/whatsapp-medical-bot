@@ -221,13 +221,9 @@ def create_patient_api():
     """Criar novo paciente via API"""
     try:
         # Verificar token admin
-        auth_header = request.headers.get('Authorization', '')
-        if not auth_header.startswith('Bearer '):
-            return jsonify({'error': 'Token de autorização necessário'}), 401
-        
-        token = auth_header.split(' ')[1]
-        if token != os.getenv('ADMIN_UI_TOKEN', 'admin123456'):
-            return jsonify({'error': 'Token inválido'}), 401
+        admin_token = request.headers.get('X-Admin-Token')
+        if admin_token != 'admin123456':
+            return jsonify({'error': 'Unauthorized', 'success': False}), 401
         
         # Obter dados do formulário
         data = request.get_json() or {}
@@ -311,6 +307,43 @@ def create_tables():
             "error": f"Erro ao criar tabelas: {str(e)}",
             "success": False
         }), 500
+
+
+@app.route('/admin/api/create-tables', methods=['POST'])
+def create_tables_endpoint():
+    """Força criação de todas as tabelas do banco"""
+    try:
+        # Verifica autenticação admin
+        admin_token = request.headers.get('X-Admin-Token')
+        if admin_token != 'admin123456':
+            return jsonify({"error": "Unauthorized", "success": False}), 401
+        
+        # Cria todas as tabelas
+        with app.app_context():
+            db.create_all()
+        
+        # Verifica se as tabelas foram criadas
+        tables_created = []
+        inspector = db.inspect(db.engine)
+        
+        expected_tables = ['patients', 'responses', 'schedules']
+        for table_name in expected_tables:
+            if inspector.has_table(table_name):
+                tables_created.append(table_name)
+        
+        return jsonify({
+            "success": True,
+            "message": "Tabelas criadas com sucesso",
+            "tables_created": tables_created,
+            "total_tables": len(tables_created)
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            "error": f"Erro ao criar tabelas: {str(e)}",
+            "success": False
+        }), 500
+
 
 if __name__ == "__main__":
     # Validar ambiente
