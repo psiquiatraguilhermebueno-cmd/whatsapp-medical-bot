@@ -1,0 +1,261 @@
+{% extends "base.html" %}
+
+{% block title %}Campanhas - Admin WhatsApp Bot{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h2>Campanhas WhatsApp</h2>
+                <a href="{{ url_for('admin.new_campaign') }}" class="btn btn-primary">
+                    <i class="fas fa-plus"></i> Nova Campanha
+                </a>
+            </div>
+
+            <!-- Filtros -->
+            <div class="card mb-4">
+                <div class="card-body">
+                    <form method="GET" class="row g-3">
+                        <div class="col-md-3">
+                            <label for="status" class="form-label">Status</label>
+                            <select class="form-select" id="status" name="status">
+                                <option value="">Todos</option>
+                                <option value="active" {% if request.args.get('status') == 'active' %}selected{% endif %}>Ativa</option>
+                                <option value="paused" {% if request.args.get('status') == 'paused' %}selected{% endif %}>Pausada</option>
+                                <option value="done" {% if request.args.get('status') == 'done' %}selected{% endif %}>Concluída</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <label for="frequency" class="form-label">Frequência</label>
+                            <select class="form-select" id="frequency" name="frequency">
+                                <option value="">Todas</option>
+                                <option value="once" {% if request.args.get('frequency') == 'once' %}selected{% endif %}>Uma vez</option>
+                                <option value="daily" {% if request.args.get('frequency') == 'daily' %}selected{% endif %}>Diária</option>
+                                <option value="weekly" {% if request.args.get('frequency') == 'weekly' %}selected{% endif %}>Semanal</option>
+                                <option value="monthly" {% if request.args.get('frequency') == 'monthly' %}selected{% endif %}>Mensal</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label for="search" class="form-label">Buscar</label>
+                            <input type="text" class="form-control" id="search" name="search" 
+                                   placeholder="Nome da campanha..." value="{{ request.args.get('search', '') }}">
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label">&nbsp;</label>
+                            <div class="d-grid">
+                                <button type="submit" class="btn btn-outline-primary">Filtrar</button>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Lista de Campanhas -->
+            <div class="card">
+                <div class="card-body">
+                    {% if campaigns %}
+                        <div class="table-responsive">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>Nome</th>
+                                        <th>Template</th>
+                                        <th>Frequência</th>
+                                        <th>Status</th>
+                                        <th>Próxima Execução</th>
+                                        <th>Criada em</th>
+                                        <th>Ações</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for campaign in campaigns %}
+                                    <tr>
+                                        <td>
+                                            <strong>{{ campaign.name }}</strong>
+                                        </td>
+                                        <td>
+                                            <code>{{ campaign.template_name }}</code>
+                                        </td>
+                                        <td>
+                                            <span class="badge bg-info">{{ campaign.frequency }}</span>
+                                        </td>
+                                        <td>
+                                            {% if campaign.status == 'active' %}
+                                                <span class="badge bg-success">Ativa</span>
+                                            {% elif campaign.status == 'paused' %}
+                                                <span class="badge bg-warning">Pausada</span>
+                                            {% else %}
+                                                <span class="badge bg-secondary">Concluída</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {% if campaign.next_run %}
+                                                {{ campaign.next_run.strftime('%d/%m/%Y %H:%M') }}
+                                            {% else %}
+                                                <span class="text-muted">-</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {{ campaign.created_at.strftime('%d/%m/%Y') }}
+                                        </td>
+                                        <td>
+                                            <div class="btn-group btn-group-sm">
+                                                <a href="{{ url_for('admin.view_campaign', id=campaign.id) }}" 
+                                                   class="btn btn-outline-primary" title="Ver detalhes">
+                                                    <i class="fas fa-eye"></i>
+                                                </a>
+                                                <a href="{{ url_for('admin.edit_campaign', id=campaign.id) }}" 
+                                                   class="btn btn-outline-secondary" title="Editar">
+                                                    <i class="fas fa-edit"></i>
+                                                </a>
+                                                {% if campaign.status == 'active' %}
+                                                    <button class="btn btn-outline-warning" 
+                                                            onclick="pauseCampaign('{{ campaign.id }}')" title="Pausar">
+                                                        <i class="fas fa-pause"></i>
+                                                    </button>
+                                                {% elif campaign.status == 'paused' %}
+                                                    <button class="btn btn-outline-success" 
+                                                            onclick="resumeCampaign('{{ campaign.id }}')" title="Retomar">
+                                                        <i class="fas fa-play"></i>
+                                                    </button>
+                                                {% endif %}
+                                                <button class="btn btn-outline-danger" 
+                                                        onclick="deleteCampaign('{{ campaign.id }}')" title="Excluir">
+                                                    <i class="fas fa-trash"></i>
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <!-- Paginação -->
+                        {% if pagination.pages > 1 %}
+                        <nav aria-label="Paginação de campanhas">
+                            <ul class="pagination justify-content-center">
+                                {% if pagination.has_prev %}
+                                    <li class="page-item">
+                                        <a class="page-link" href="{{ url_for('admin.campaigns', page=pagination.prev_num, **request.args) }}">
+                                            Anterior
+                                        </a>
+                                    </li>
+                                {% endif %}
+                                
+                                {% for page_num in pagination.iter_pages() %}
+                                    {% if page_num %}
+                                        {% if page_num != pagination.page %}
+                                            <li class="page-item">
+                                                <a class="page-link" href="{{ url_for('admin.campaigns', page=page_num, **request.args) }}">
+                                                    {{ page_num }}
+                                                </a>
+                                            </li>
+                                        {% else %}
+                                            <li class="page-item active">
+                                                <span class="page-link">{{ page_num }}</span>
+                                            </li>
+                                        {% endif %}
+                                    {% else %}
+                                        <li class="page-item disabled">
+                                            <span class="page-link">…</span>
+                                        </li>
+                                    {% endif %}
+                                {% endfor %}
+                                
+                                {% if pagination.has_next %}
+                                    <li class="page-item">
+                                        <a class="page-link" href="{{ url_for('admin.campaigns', page=pagination.next_num, **request.args) }}">
+                                            Próxima
+                                        </a>
+                                    </li>
+                                {% endif %}
+                            </ul>
+                        </nav>
+                        {% endif %}
+
+                    {% else %}
+                        <div class="text-center py-5">
+                            <i class="fas fa-bullhorn fa-3x text-muted mb-3"></i>
+                            <h4 class="text-muted">Nenhuma campanha encontrada</h4>
+                            <p class="text-muted">Comece criando sua primeira campanha de mensagens WhatsApp.</p>
+                            <a href="{{ url_for('admin.new_campaign') }}" class="btn btn-primary">
+                                <i class="fas fa-plus"></i> Criar Primeira Campanha
+                            </a>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function pauseCampaign(campaignId) {
+    if (confirm('Tem certeza que deseja pausar esta campanha?')) {
+        fetch(`/admin/api/campaigns/${campaignId}/pause`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                location.reload();
+            } else {
+                alert('Erro ao pausar campanha: ' + data.error);
+            }
+        })
+        .catch(error => {
+            alert('Erro ao pausar campanha: ' + error);
+        });
+    }
+}
+
+function resumeCampaign(campaignId) {
+    if (confirm('Tem certeza que deseja retomar esta campanha?')) {
+        fetch(`/admin/api/campaigns/${campaignId}/resume`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                location.reload();
+            } else {
+                alert('Erro ao retomar campanha: ' + data.error);
+            }
+        })
+        .catch(error => {
+            alert('Erro ao retomar campanha: ' + error);
+        });
+    }
+}
+
+function deleteCampaign(campaignId) {
+    if (confirm('Tem certeza que deseja excluir esta campanha? Esta ação não pode ser desfeita.')) {
+        fetch(`/admin/api/campaigns/${campaignId}`, {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                location.reload();
+            } else {
+                alert('Erro ao excluir campanha: ' + data.error);
+            }
+        })
+        .catch(error => {
+            alert('Erro ao excluir campanha: ' + error);
+        });
+    }
+}
+</script>
+{% endblock %}

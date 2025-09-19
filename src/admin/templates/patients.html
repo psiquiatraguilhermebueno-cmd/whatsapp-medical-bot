@@ -1,0 +1,251 @@
+{% extends "base.html" %}
+
+{% block title %}Pacientes - Admin WhatsApp Bot{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h2>Pacientes</h2>
+                <a href="{{ url_for('admin.new_patient') }}" class="btn btn-primary">
+                    <i class="fas fa-plus"></i> Novo Paciente
+                </a>
+            </div>
+
+            <!-- Filtros -->
+            <div class="card mb-4">
+                <div class="card-body">
+                    <form method="GET" class="row g-3">
+                        <div class="col-md-3">
+                            <label for="status" class="form-label">Status</label>
+                            <select class="form-select" id="status" name="status">
+                                <option value="">Todos</option>
+                                <option value="active" {% if request.args.get('status') == 'active' %}selected{% endif %}>Ativo</option>
+                                <option value="inactive" {% if request.args.get('status') == 'inactive' %}selected{% endif %}>Inativo</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label for="search" class="form-label">Buscar</label>
+                            <input type="text" class="form-control" id="search" name="search" 
+                                   placeholder="Nome ou telefone..." value="{{ request.args.get('search', '') }}">
+                        </div>
+                        <div class="col-md-3">
+                            <label for="tag" class="form-label">Tag</label>
+                            <input type="text" class="form-control" id="tag" name="tag" 
+                                   placeholder="Filtrar por tag..." value="{{ request.args.get('tag', '') }}">
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label">&nbsp;</label>
+                            <div class="d-grid">
+                                <button type="submit" class="btn btn-outline-primary">Filtrar</button>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Lista de Pacientes -->
+            <div class="card">
+                <div class="card-body">
+                    {% if patients %}
+                        <div class="table-responsive">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>Nome</th>
+                                        <th>Telefone</th>
+                                        <th>Tags</th>
+                                        <th>Status</th>
+                                        <th>Cadastrado em</th>
+                                        <th>Ações</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for patient in patients %}
+                                    <tr>
+                                        <td>
+                                            <strong>{{ patient.name }}</strong>
+                                        </td>
+                                        <td>
+                                            <code>{{ patient.phone_e164 }}</code>
+                                        </td>
+                                        <td>
+                                            {% if patient.tags %}
+                                                {% for tag in patient.tags %}
+                                                    <span class="badge bg-secondary me-1">{{ tag }}</span>
+                                                {% endfor %}
+                                            {% else %}
+                                                <span class="text-muted">-</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {% if patient.active %}
+                                                <span class="badge bg-success">Ativo</span>
+                                            {% else %}
+                                                <span class="badge bg-secondary">Inativo</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {{ patient.created_at.strftime('%d/%m/%Y') }}
+                                        </td>
+                                        <td>
+                                            <div class="btn-group btn-group-sm">
+                                                <a href="{{ url_for('admin.view_patient', id=patient.id) }}" 
+                                                   class="btn btn-outline-primary" title="Ver detalhes">
+                                                    <i class="fas fa-eye"></i>
+                                                </a>
+                                                <a href="{{ url_for('admin.edit_patient', id=patient.id) }}" 
+                                                   class="btn btn-outline-secondary" title="Editar">
+                                                    <i class="fas fa-edit"></i>
+                                                </a>
+                                                {% if patient.active %}
+                                                    <button class="btn btn-outline-warning" 
+                                                            onclick="deactivatePatient('{{ patient.id }}')" title="Desativar">
+                                                        <i class="fas fa-pause"></i>
+                                                    </button>
+                                                {% else %}
+                                                    <button class="btn btn-outline-success" 
+                                                            onclick="activatePatient('{{ patient.id }}')" title="Ativar">
+                                                        <i class="fas fa-play"></i>
+                                                    </button>
+                                                {% endif %}
+                                                <button class="btn btn-outline-danger" 
+                                                        onclick="deletePatient('{{ patient.id }}')" title="Excluir">
+                                                    <i class="fas fa-trash"></i>
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <!-- Paginação -->
+                        {% if pagination.pages > 1 %}
+                        <nav aria-label="Paginação de pacientes">
+                            <ul class="pagination justify-content-center">
+                                {% if pagination.has_prev %}
+                                    <li class="page-item">
+                                        <a class="page-link" href="{{ url_for('admin.patients', page=pagination.prev_num, **request.args) }}">
+                                            Anterior
+                                        </a>
+                                    </li>
+                                {% endif %}
+                                
+                                {% for page_num in pagination.iter_pages() %}
+                                    {% if page_num %}
+                                        {% if page_num != pagination.page %}
+                                            <li class="page-item">
+                                                <a class="page-link" href="{{ url_for('admin.patients', page=page_num, **request.args) }}">
+                                                    {{ page_num }}
+                                                </a>
+                                            </li>
+                                        {% else %}
+                                            <li class="page-item active">
+                                                <span class="page-link">{{ page_num }}</span>
+                                            </li>
+                                        {% endif %}
+                                    {% else %}
+                                        <li class="page-item disabled">
+                                            <span class="page-link">…</span>
+                                        </li>
+                                    {% endif %}
+                                {% endfor %}
+                                
+                                {% if pagination.has_next %}
+                                    <li class="page-item">
+                                        <a class="page-link" href="{{ url_for('admin.patients', page=pagination.next_num, **request.args) }}">
+                                            Próxima
+                                        </a>
+                                    </li>
+                                {% endif %}
+                            </ul>
+                        </nav>
+                        {% endif %}
+
+                    {% else %}
+                        <div class="text-center py-5">
+                            <i class="fas fa-users fa-3x text-muted mb-3"></i>
+                            <h4 class="text-muted">Nenhum paciente encontrado</h4>
+                            <p class="text-muted">Comece adicionando seu primeiro paciente ao sistema.</p>
+                            <a href="{{ url_for('admin.new_patient') }}" class="btn btn-primary">
+                                <i class="fas fa-plus"></i> Adicionar Primeiro Paciente
+                            </a>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function activatePatient(patientId) {
+    if (confirm('Tem certeza que deseja ativar este paciente?')) {
+        fetch(`/admin/api/patients/${patientId}/activate`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                location.reload();
+            } else {
+                alert('Erro ao ativar paciente: ' + data.error);
+            }
+        })
+        .catch(error => {
+            alert('Erro ao ativar paciente: ' + error);
+        });
+    }
+}
+
+function deactivatePatient(patientId) {
+    if (confirm('Tem certeza que deseja desativar este paciente?')) {
+        fetch(`/admin/api/patients/${patientId}/deactivate`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                location.reload();
+            } else {
+                alert('Erro ao desativar paciente: ' + data.error);
+            }
+        })
+        .catch(error => {
+            alert('Erro ao desativar paciente: ' + error);
+        });
+    }
+}
+
+function deletePatient(patientId) {
+    if (confirm('Tem certeza que deseja excluir este paciente? Esta ação não pode ser desfeita.')) {
+        fetch(`/admin/api/patients/${patientId}`, {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                location.reload();
+            } else {
+                alert('Erro ao excluir paciente: ' + data.error);
+            }
+        })
+        .catch(error => {
+            alert('Erro ao excluir paciente: ' + error);
+        });
+    }
+}
+</script>
+{% endblock %}
