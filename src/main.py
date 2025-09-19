@@ -319,10 +319,6 @@ def emergency_gad7_handler(phone_number, text_body):
     text_lower = text_body.lower().strip()
     
     # Comandos especiais
-    # Tentar handler de emergência primeiro
-    if emergency_gad7_handler(phone_number, text_body):
-        return True
-    
     if text_lower == 'gad7':
         # Enviar todas as perguntas de uma vez
         all_questions = """📋 *QUESTIONÁRIO GAD-7 COMPLETO*
