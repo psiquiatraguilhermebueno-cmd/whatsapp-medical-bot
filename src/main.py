@@ -143,8 +143,10 @@ def start_gad7_questionnaire(phone_number):
         'started_at': datetime.now().isoformat()
     }
     
-    # Enviar apenas instruções primeiro
-    instructions = """📋 *INSTRUÇÕES GAD-7*
+    print(f"🚀 Starting GAD-7 for {phone_number}")
+    
+    # Enviar instruções e primeira pergunta juntas
+    complete_message = """📋 *INSTRUÇÕES GAD-7*
 
 Para cada pergunta, responda APENAS O NÚMERO:
 • 0 = Nenhuma vez
@@ -152,17 +154,11 @@ Para cada pergunta, responda APENAS O NÚMERO:
 • 2 = Mais da metade dos dias
 • 3 = Quase todos os dias
 
-Exemplo: Se a resposta for "Vários dias", digite apenas: 1
-
 Digite *cancelar* a qualquer momento para interromper.
 
-Aguarde a primeira pergunta..."""
-    
-    # Enviar instruções
-    send_whatsapp_message(phone_number, instructions)
-    
-    # Enviar primeira pergunta imediatamente após
-    first_question = """*PERGUNTA 1/7*
+---
+
+*PERGUNTA 1/7*
 
 Nas últimas 2 semanas, com que frequência você percebeu-se incomodado por:
 
@@ -170,7 +166,11 @@ Nas últimas 2 semanas, com que frequência você percebeu-se incomodado por:
 
 Responda apenas o número: 0, 1, 2 ou 3"""
     
-    return send_whatsapp_message(phone_number, first_question)
+    print(f"📤 Sending complete message to {phone_number}")
+    result = send_whatsapp_message(phone_number, complete_message)
+    print(f"📊 Send result: {result}")
+    
+    return result
 
 def cancel_questionnaire(phone_number):
     """Cancela questionário em andamento"""
