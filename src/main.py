@@ -641,6 +641,15 @@ def create_tables():
             'error': str(e)
         }), 500
 
+
+# Criar tabelas na inicialização
+with app.app_context():
+    try:
+        db.create_all()
+        print("✅ Tabelas criadas/verificadas")
+    except Exception as e:
+        print(f"⚠️ Erro ao criar tabelas: {e}")
+
 if __name__ == "__main__":
     # Validar ambiente
     validate_environment()
