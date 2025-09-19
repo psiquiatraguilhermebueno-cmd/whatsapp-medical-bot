@@ -331,6 +331,14 @@ def whatsapp_webhook():
                             if text_body.lower() == 'gad7':
                                 print("🚀 Starting GAD-7 invitation")
                                 send_gad7_invitation(phone_number)
+                            elif text_body.lower() in ['cancelar', 'parar', 'sair', 'stop']:
+                                # Cancelar questionário em andamento
+                                if phone_number in questionnaire_states:
+                                    del questionnaire_states[phone_number]
+                                    print(f"⏹️ Questionnaire cancelled for {phone_number}")
+                                    send_whatsapp_message(phone_number, "❌ Questionário cancelado. Digite 'gad7' se quiser tentar novamente.")
+                                else:
+                                    send_whatsapp_message(phone_number, "ℹ️ Nenhum questionário ativo para cancelar.")
                             elif phone_number in questionnaire_states:
                                 # Processar resposta do questionário
                                 print(f"🔄 Processing questionnaire response")
@@ -341,6 +349,7 @@ def whatsapp_webhook():
 
 Comandos disponíveis:
 • Digite *gad7* para iniciar o questionário de ansiedade
+• Digite *cancelar* para interromper questionário em andamento
 
 Como posso ajudá-lo hoje?"""
                                 send_whatsapp_message(phone_number, help_message)
