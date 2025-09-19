@@ -322,10 +322,10 @@ def process_text_message(phone_number, text_body):
         print(f"⏹️ Cancel command received: {text_lower}")
         return cancel_questionnaire(phone_number)
     
-    # Comando para iniciar GAD-7
-    elif text_lower == 'gad7':
-        print("🚀 Starting GAD-7 invitation")
-        return send_gad7_invitation(phone_number)
+    # Comandos específicos
+    if text_lower == 'gad7':
+        print("📋 GAD-7 questionnaire requested - STARTING DIRECTLY")
+        return start_gad7_questionnaire(phone_number)
     
     # Se há questionário ativo, processar resposta
     elif phone_number in questionnaire_states:
