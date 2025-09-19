@@ -215,6 +215,67 @@ def serve(path):
                 }
             }
 
+
+@app.route('/admin/api/patients', methods=['POST'])
+def create_patient_api():
+    """Criar novo paciente via API"""
+    try:
+        # Verificar token admin
+        auth_header = request.headers.get('Authorization', '')
+        if not auth_header.startswith('Bearer '):
+            return jsonify({'error': 'Token de autorização necessário'}), 401
+        
+        token = auth_header.split(' ')[1]
+        if token != os.getenv('ADMIN_UI_TOKEN', 'admin123456'):
+            return jsonify({'error': 'Token inválido'}), 401
+        
+        # Obter dados do formulário
+        data = request.get_json() or {}
+        
+        # Validar campos obrigatórios
+        name = data.get('name', '').strip()
+        phone = data.get('phone', '').strip()
+        
+        if not name or not phone:
+            return jsonify({'error': 'Nome e telefone são obrigatórios'}), 400
+        
+        # Limpar telefone (manter apenas números)
+        phone_clean = ''.join(filter(str.isdigit, phone))
+        if len(phone_clean) < 10:
+            return jsonify({'error': 'Telefone inválido'}), 400
+        
+        # Formatear telefone brasileiro
+        if phone_clean.startswith('55'):
+            phone_formatted = f"+{phone_clean}"
+        elif phone_clean.startswith('14'):
+            phone_formatted = f"+55{phone_clean}"
+        else:
+            phone_formatted = f"+55{phone_clean}"
+        
+        # Criar paciente simples (sem banco de dados por enquanto)
+        patient_data = {
+            'id': len(phone_clean),  # ID temporário
+            'name': name,
+            'phone': phone_formatted,
+            'email': data.get('email', ''),
+            'protocols': data.get('protocols', []),
+            'active': True,
+            'created_at': 'now'
+        }
+        
+        # Log do cadastro
+        app.logger.info(f"✅ Paciente cadastrado: {name} ({phone_formatted})")
+        
+        return jsonify({
+            'success': True,
+            'message': f'Paciente {name} cadastrado com sucesso!',
+            'patient': patient_data
+        }), 201
+        
+    except Exception as e:
+        app.logger.error(f"❌ Erro ao cadastrar paciente: {str(e)}")
+        return jsonify({'error': f'Erro interno: {str(e)}'}), 500
+
 if __name__ == "__main__":
     # Validar ambiente
     validate_environment()
