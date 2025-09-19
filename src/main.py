@@ -52,7 +52,7 @@ else:
 
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
-# Inicializar SQLAlchemy com a aplicação
+# CORREÇÃO CRÍTICA: Inicializar SQLAlchemy com a aplicação
 db.init_app(app)
 
 # Habilitar CORS para todas as rotas
@@ -165,11 +165,10 @@ def seed_admin_patient():
 
 @app.route('/health')
 def health_check():
-    """Health check endpoint"""
+    """Health check endpoint - VERSÃO CORRIGIDA"""
     try:
-        # Testar conexão com o banco
-        with app.app_context():
-            db.session.execute(db.text('SELECT 1'))
+        # Testar conexão com o banco de forma segura
+        db.session.execute(db.text('SELECT 1'))
         database_status = 'connected'
     except Exception as e:
         logger.warning(f"Database connection test failed: {e}")
@@ -256,4 +255,3 @@ if __name__ == "__main__":
     logger.info(f"Health check: http://localhost:{port}/health")
     
     app.run(host="0.0.0.0", port=port, debug=debug)
-
