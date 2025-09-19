@@ -154,6 +154,8 @@ Para cada pergunta, responda APENAS O NÚMERO:
 
 Exemplo: Se a resposta for "Vários dias", digite apenas: 1
 
+Digite *cancelar* a qualquer momento para interromper.
+
 ---
 
 *PERGUNTA 1/7*
@@ -166,10 +168,19 @@ Responda apenas o número: 0, 1, 2 ou 3"""
     
     return send_whatsapp_message(phone_number, instructions)
 
+def cancel_questionnaire(phone_number):
+    """Cancela questionário em andamento"""
+    if phone_number in questionnaire_states:
+        del questionnaire_states[phone_number]
+        print(f"⏹️ Questionnaire cancelled for {phone_number}")
+        return send_whatsapp_message(phone_number, "❌ Questionário cancelado. Digite *gad7* se quiser tentar novamente.")
+    else:
+        return send_whatsapp_message(phone_number, "ℹ️ Nenhum questionário ativo para cancelar.")
+
 def process_gad7_response(phone_number, response_text):
     """Processa resposta do GAD-7"""
     if phone_number not in questionnaire_states:
-        return send_whatsapp_message(phone_number, "❌ Questionário não encontrado. Digite 'gad7' para iniciar.")
+        return send_whatsapp_message(phone_number, "❌ Questionário não encontrado. Digite *gad7* para iniciar.")
     
     state = questionnaire_states[phone_number]
     
@@ -178,7 +189,7 @@ def process_gad7_response(phone_number, response_text):
     # Validar resposta
     if response_text not in ['0', '1', '2', '3']:
         return send_whatsapp_message(phone_number, 
-            f"❌ Resposta inválida. Por favor, responda apenas: 0, 1, 2 ou 3")
+            f"❌ Resposta inválida. Por favor, responda apenas: 0, 1, 2 ou 3\n\nOu digite *cancelar* para interromper.")
     
     # Salvar resposta
     state['responses'].append(int(response_text))
@@ -204,7 +215,8 @@ Nas últimas 2 semanas, com que frequência você percebeu-se incomodado por:
 
 *{GAD7_QUESTIONS[next_q]}*
 
-Responda apenas o número: 0, 1, 2 ou 3"""
+Responda apenas o número: 0, 1, 2 ou 3
+(Digite *cancelar* para interromper)"""
         
         message = feedback + next_question
         print(f"📤 Sending question {next_q + 1}/7")
@@ -244,7 +256,9 @@ Responda apenas o número: 0, 1, 2 ou 3"""
         result_message += f"""
 *Data:* {datetime.now().strftime('%d/%m/%Y às %H:%M')}
 
-Obrigado por responder o questionário! 🙏"""
+Obrigado por responder o questionário! 🙏
+
+Digite *gad7* para fazer um novo questionário."""
         
         message = feedback + result_message
         
@@ -255,13 +269,45 @@ Obrigado por responder o questionário! 🙏"""
     
     return send_whatsapp_message(phone_number, message)
 
+def process_text_message(phone_number, text_body):
+    """Processa mensagens de texto"""
+    text_lower = text_body.lower().strip()
+    
+    print(f"📝 Processing text: '{text_body}' from {phone_number}")
+    
+    # Comandos de cancelamento (prioridade máxima)
+    if text_lower in ['cancelar', 'parar', 'sair', 'stop', 'cancel']:
+        print(f"⏹️ Cancel command received: {text_lower}")
+        return cancel_questionnaire(phone_number)
+    
+    # Comando para iniciar GAD-7
+    elif text_lower == 'gad7':
+        print("🚀 Starting GAD-7 invitation")
+        return send_gad7_invitation(phone_number)
+    
+    # Se há questionário ativo, processar resposta
+    elif phone_number in questionnaire_states:
+        print(f"🔄 Processing questionnaire response")
+        return process_gad7_response(phone_number, text_body)
+    
+    # Mensagem de ajuda
+    else:
+        help_message = """👋 Olá! Sou o assistente da *Clínica Dr. Guilherme*.
+
+*Comandos disponíveis:*
+• Digite *gad7* para iniciar o questionário de ansiedade
+• Digite *cancelar* para interromper questionário em andamento
+
+Como posso ajudá-lo hoje?"""
+        return send_whatsapp_message(phone_number, help_message)
+
 @app.route("/")
 def index():
     return jsonify({
         "service": "whatsapp-medical-bot",
         "status": "running",
-        "version": "1.0.0",
-        "features": ["gad7_questionnaire", "interactive_buttons"]
+        "version": "1.1.0",
+        "features": ["gad7_questionnaire", "interactive_buttons", "cancel_commands"]
     })
 
 @app.route("/health")
@@ -269,7 +315,7 @@ def health():
     return jsonify({
         "service": "whatsapp-medical-bot",
         "status": "healthy",
-        "version": "1.0.0",
+        "version": "1.1.0",
         "database": "ok",
         "admin_enabled": True,
         "whatsapp_configured": bool(WHATSAPP_ACCESS_TOKEN and WHATSAPP_PHONE_NUMBER_ID),
@@ -324,35 +370,7 @@ def whatsapp_webhook():
                         
                         if message_type == 'text':
                             text_body = message.get('text', {}).get('body', '').strip()
-                            
-                            print(f"📝 Text message: '{text_body}'")
-                            
-                            # Comandos especiais
-                            if text_body.lower() == 'gad7':
-                                print("🚀 Starting GAD-7 invitation")
-                                send_gad7_invitation(phone_number)
-                            elif text_body.lower() in ['cancelar', 'parar', 'sair', 'stop']:
-                                # Cancelar questionário em andamento
-                                if phone_number in questionnaire_states:
-                                    del questionnaire_states[phone_number]
-                                    print(f"⏹️ Questionnaire cancelled for {phone_number}")
-                                    send_whatsapp_message(phone_number, "❌ Questionário cancelado. Digite 'gad7' se quiser tentar novamente.")
-                                else:
-                                    send_whatsapp_message(phone_number, "ℹ️ Nenhum questionário ativo para cancelar.")
-                            elif phone_number in questionnaire_states:
-                                # Processar resposta do questionário
-                                print(f"🔄 Processing questionnaire response")
-                                process_gad7_response(phone_number, text_body)
-                            else:
-                                # Mensagem de ajuda
-                                help_message = """👋 Olá! Sou o assistente da Clínica Dr. Guilherme.
-
-Comandos disponíveis:
-• Digite *gad7* para iniciar o questionário de ansiedade
-• Digite *cancelar* para interromper questionário em andamento
-
-Como posso ajudá-lo hoje?"""
-                                send_whatsapp_message(phone_number, help_message)
+                            process_text_message(phone_number, text_body)
                         
                         elif message_type == 'interactive':
                             # Processar botões interativos
@@ -367,7 +385,7 @@ Como posso ajudá-lo hoje?"""
                                 start_gad7_questionnaire(phone_number)
                             elif button_id == 'stop_gad7':
                                 print("⏹️ Stopping GAD-7")
-                                send_whatsapp_message(phone_number, "❌ Questionário cancelado. Digite 'gad7' se quiser tentar novamente.")
+                                cancel_questionnaire(phone_number)
             
             return jsonify({"status": "ok"})
             
@@ -398,13 +416,22 @@ def debug_states():
         } for phone, state in questionnaire_states.items()}
     })
 
+@app.route("/api/debug/clear")
+def clear_states():
+    """Endpoint para limpar todos os estados (debug)"""
+    global questionnaire_states
+    count = len(questionnaire_states)
+    questionnaire_states = {}
+    return jsonify({"status": "success", "message": f"Cleared {count} questionnaire states"})
+
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
     
-    print(f"🚀 Starting WhatsApp Medical Bot on port {port}")
+    print(f"🚀 Starting WhatsApp Medical Bot v1.1.0 on port {port}")
     print(f"📱 WhatsApp configured: {bool(WHATSAPP_ACCESS_TOKEN and WHATSAPP_PHONE_NUMBER_ID)}")
     print(f"🔗 Webhook URL: https://web-production-4fc41.up.railway.app/api/whatsapp/webhook")
     print(f"💊 Health check: https://web-production-4fc41.up.railway.app/health")
     print(f"🐛 Debug states: https://web-production-4fc41.up.railway.app/api/debug/states")
+    print(f"🧹 Clear states: https://web-production-4fc41.up.railway.app/api/debug/clear")
     
     app.run(host="0.0.0.0", port=port, debug=False)
