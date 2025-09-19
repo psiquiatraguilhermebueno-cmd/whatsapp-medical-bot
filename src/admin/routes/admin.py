@@ -530,3 +530,219 @@ def api_campaign_test(campaign_id):
         logger.error(f"Error testing campaign {campaign_id}: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
+# API Endpoints para Pacientes
+@admin_bp.route('/api/patients', methods=['GET'])
+@require_auth
+def api_patients_list():
+    """Listar pacientes"""
+    try:
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 20, type=int)
+        
+        patients = AdminPatient.query.order_by(desc(AdminPatient.created_at)).paginate(
+            page=page, per_page=per_page, error_out=False
+        )
+        
+        patients_data = []
+        for patient in patients.items:
+            patients_data.append({
+                'id': str(patient.id),
+                'name': patient.name,
+                'phone_e164': f"****{patient.phone_e164[-4:]}" if len(patient.phone_e164) >= 4 else "****",
+                'phone_full': patient.phone_e164,  # Para edição
+                'active': patient.active,
+                'created_at': patient.created_at.isoformat() if patient.created_at else None,
+                'protocols': patient.protocols or {}
+            })
+        
+        return jsonify({
+            'success': True,
+            'patients': patients_data,
+            'pagination': {
+                'page': patients.page,
+                'pages': patients.pages,
+                'per_page': patients.per_page,
+                'total': patients.total,
+                'has_next': patients.has_next,
+                'has_prev': patients.has_prev
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Error listing patients: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@admin_bp.route('/api/patients', methods=['POST'])
+@require_auth
+def api_patients_create():
+    """Criar novo paciente"""
+    try:
+        data = request.get_json()
+        
+        # Validações básicas
+        name = data.get('name', '').strip()
+        phone = data.get('phone', '').strip()
+        
+        if not name or not phone:
+            return jsonify({'success': False, 'error': 'Nome e telefone são obrigatórios'}), 400
+        
+        # Limpar e formatar telefone
+        phone_clean = ''.join(filter(str.isdigit, phone))
+        if len(phone_clean) < 10:
+            return jsonify({'success': False, 'error': 'Telefone inválido'}), 400
+        
+        # Formatear telefone brasileiro
+        if phone_clean.startswith('55'):
+            phone_formatted = phone_clean
+        elif phone_clean.startswith('14'):
+            phone_formatted = f"55{phone_clean}"
+        else:
+            phone_formatted = f"55{phone_clean}"
+        
+        # Verificar se já existe
+        existing_patient = AdminPatient.query.filter_by(phone_e164=phone_formatted).first()
+        if existing_patient:
+            return jsonify({'success': False, 'error': 'Paciente com este telefone já existe'}), 400
+        
+        # Criar paciente
+        patient = AdminPatient(
+            name=name,
+            phone_e164=phone_formatted,
+            email=data.get('email', '').strip() or None,
+            birth_date=datetime.strptime(data['birth_date'], '%Y-%m-%d').date() if data.get('birth_date') else None,
+            gender=data.get('gender') or None,
+            protocols=data.get('protocols', {}),
+            priority=data.get('priority', 'normal'),
+            notes=data.get('notes', '').strip() or None,
+            active=data.get('active', True)
+        )
+        
+        db.session.add(patient)
+        db.session.commit()
+        
+        logger.info(f"Patient created: {name} (ID: {patient.id}, Phone: ****{phone_formatted[-4:]})")
+        
+        return jsonify({
+            'success': True,
+            'patient': {
+                'id': str(patient.id),
+                'name': patient.name,
+                'phone_masked': f"****{phone_formatted[-4:]}",
+                'active': patient.active
+            },
+            'message': f'Paciente {name} cadastrado com sucesso'
+        }), 201
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error creating patient: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@admin_bp.route('/api/patients/<patient_id>', methods=['GET'])
+@require_auth
+def api_patient_detail(patient_id):
+    """Detalhes do paciente"""
+    try:
+        patient = AdminPatient.query.get_or_404(patient_id)
+        
+        return jsonify({
+            'success': True,
+            'patient': {
+                'id': str(patient.id),
+                'name': patient.name,
+                'phone_e164': patient.phone_e164,
+                'email': patient.email,
+                'birth_date': patient.birth_date.isoformat() if patient.birth_date else None,
+                'gender': patient.gender,
+                'protocols': patient.protocols or {},
+                'priority': patient.priority,
+                'notes': patient.notes,
+                'active': patient.active,
+                'created_at': patient.created_at.isoformat() if patient.created_at else None
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting patient {patient_id}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@admin_bp.route('/api/patients/<patient_id>', methods=['PUT'])
+@require_auth
+def api_patient_update(patient_id):
+    """Atualizar paciente"""
+    try:
+        patient = AdminPatient.query.get_or_404(patient_id)
+        data = request.get_json()
+        
+        # Atualizar campos
+        if 'name' in data:
+            patient.name = data['name'].strip()
+        
+        if 'phone' in data:
+            phone_clean = ''.join(filter(str.isdigit, data['phone']))
+            if len(phone_clean) >= 10:
+                if phone_clean.startswith('55'):
+                    patient.phone_e164 = phone_clean
+                elif phone_clean.startswith('14'):
+                    patient.phone_e164 = f"55{phone_clean}"
+                else:
+                    patient.phone_e164 = f"55{phone_clean}"
+        
+        if 'email' in data:
+            patient.email = data['email'].strip() or None
+            
+        if 'birth_date' in data and data['birth_date']:
+            patient.birth_date = datetime.strptime(data['birth_date'], '%Y-%m-%d').date()
+            
+        if 'gender' in data:
+            patient.gender = data['gender'] or None
+            
+        if 'protocols' in data:
+            patient.protocols = data['protocols']
+            
+        if 'priority' in data:
+            patient.priority = data['priority']
+            
+        if 'notes' in data:
+            patient.notes = data['notes'].strip() or None
+            
+        if 'active' in data:
+            patient.active = data['active']
+        
+        db.session.commit()
+        
+        logger.info(f"Patient updated: {patient.name} (ID: {patient.id})")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Paciente atualizado com sucesso'
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error updating patient {patient_id}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@admin_bp.route('/api/patients/<patient_id>/toggle', methods=['POST'])
+@require_auth
+def api_patient_toggle(patient_id):
+    """Ativar/desativar paciente"""
+    try:
+        patient = AdminPatient.query.get_or_404(patient_id)
+        patient.active = not patient.active
+        db.session.commit()
+        
+        status = "ativado" if patient.active else "desativado"
+        logger.info(f"Patient {status}: {patient.name} (ID: {patient.id})")
+        
+        return jsonify({
+            'success': True,
+            'message': f'Paciente {status} com sucesso',
+            'active': patient.active
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error toggling patient {patient_id}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
