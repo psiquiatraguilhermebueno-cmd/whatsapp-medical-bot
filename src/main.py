@@ -161,10 +161,7 @@ Aguarde a primeira pergunta..."""
     # Enviar instruções
     send_whatsapp_message(phone_number, instructions)
     
-    # Aguardar um pouco e enviar primeira pergunta
-    import time
-    time.sleep(2)
-    
+    # Enviar primeira pergunta imediatamente após
     first_question = """*PERGUNTA 1/7*
 
 Nas últimas 2 semanas, com que frequência você percebeu-se incomodado por:
