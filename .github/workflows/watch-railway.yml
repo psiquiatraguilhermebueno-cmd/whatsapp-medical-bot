@@ -16,6 +16,7 @@ jobs:
       RW_PROJECT_ID: ${{ secrets.RW_PROJECT_ID }}
       RW_ENV_ID: ${{ secrets.RW_ENV_ID }}
       RW_SERVICE_ID: ${{ secrets.RW_SERVICE_ID }}
+      # usa Project Token do Railway via Secrets
       RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
       META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
       WHATSAPP_PHONE_NUMBER_ID: ${{ secrets.WHATSAPP_PHONE_NUMBER_ID }}
@@ -33,26 +34,17 @@ jobs:
           sudo apt-get update -y
           sudo apt-get install -y jq curl
 
-      - name: Railway login & link
-        run: |
-          set -e
-          # 1) login explícito
-          railway login --token "${RAILWAY_TOKEN}"
-          # 2) vincula o projeto (necessário para alguns subcomandos)
-          railway link --project "${RW_PROJECT_ID}" || true
-          # (opcional) confirma versão/identidade
-          railway --version || true
-          railway whoami || true
-
       - name: Fetch logs deep (Railway CLI 4.8.0)
         run: |
           set -e
-          # Coleta com service+environment e captura STDOUT+STDERR
+          # Sem login: CLI usa RAILWAY_TOKEN do ambiente
           railway logs --service "${RW_SERVICE_ID}" --environment "${RW_ENV_ID}" > logs.txt 2>&1 || true
           echo "---- tail (200) ----"
           tail -n 200 logs.txt || true
           echo "---- size(bytes) ----"
           wc -c logs.txt || true
+          echo "---- cli version ----"
+          railway --version || true
 
       - name: Health probe
         id: health
@@ -67,8 +59,7 @@ jobs:
           import re, json
           with open("logs.txt","r",errors="ignore") as f:
               raw=f.read()
-          # remove ANSI (cores)
-          txt = re.sub(r'\x1B\[[0-?]*[ -/]*[@-~]', '', raw)
+          txt = re.sub(r'\x1B\[[0-?]*[ -/]*[@-~]', '', raw)  # limpa ANSI
 
           kind=""; file=""; line="0"; summary=""
 
@@ -78,19 +69,16 @@ jobs:
               file, line = mA.group(1), mA.group(2)
               kind, summary = "IndentationError", "IndentationError (stack match)"
 
-          # (B) Mensagem do BOOT: Failed to load main.app: IndentationError: ... (main.py, line N)
+          # (B) BOOT: Failed to load main.app: IndentationError: ... (main.py, line N)
           if not kind:
               mB = re.search(r'Failed to load main\.app:\s*IndentationError:[^\(]*\(([^,]+), line (\d+)\)', txt)
               if mB:
                   fname = mB.group(1).strip()
                   line  = mB.group(2).strip()
-                  if fname == "main.py" or fname.endswith("/main.py"):
-                      file = "src/main.py"
-                  else:
-                      file = f"src/{fname}" if not fname.startswith("src/") else fname
+                  file = "src/main.py" if fname.endswith("main.py") else (f"src/{fname}" if not fname.startswith("src/") else fname)
                   kind, summary = "IndentationError", "IndentationError (boot match)"
 
-          # (C) Fallback genérico: última "IndentationError" + último "File ..., line N" anterior
+          # (C) Fallback: última "IndentationError" + último "File ..., line N" antes
           if not kind and "IndentationError" in txt:
               ind_pos = txt.rfind("IndentationError")
               pre = txt[:ind_pos]
@@ -114,7 +102,7 @@ jobs:
 
           if file.startswith("/app/"):
               file = file[len("/app/"):]
-          out={"kind":kind, "file":file, "line":line, "summary":summary}
+          out={"kind":kind,"file":file,"line":line,"summary":summary}
           open("detect.json","w").write(json.dumps(out))
           PY
           echo "kind=$(jq -r .kind detect.json)" >> "$GITHUB_OUTPUT"
