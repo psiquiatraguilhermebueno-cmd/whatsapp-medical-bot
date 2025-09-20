@@ -611,6 +611,104 @@ def configure_environment():
 
 
 
+
+# ==================== ROTAS u-ETG ====================
+
+@app.route("/api/uetg/generate-draw/<int:patient_id>", methods=['POST'])
+def generate_uetg_draw(patient_id):
+    """Gerar sorteio semanal para paciente"""
+    try:
+        from uetg_system import uetg
+        
+        draw_info = uetg.generate_weekly_draw(patient_id)
+        
+        if draw_info:
+            # Enviar notificação para admin
+            uetg.send_draw_notification_to_admin(draw_info)
+            
+            return jsonify({
+                "status": "success",
+                "message": "Sorteio gerado com sucesso",
+                "draw_info": {
+                    "first_date": draw_info['first_date'].isoformat(),
+                    "second_date": draw_info['second_date'].isoformat(),
+                    "patient_name": draw_info['patient_name']
+                }
+            })
+        else:
+            return jsonify({
+                "status": "error",
+                "message": "Não foi possível gerar sorteio"
+            }), 400
+            
+    except Exception as e:
+        print(f"💥 Error generating draw: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route("/api/uetg/add-patient", methods=['POST'])
+def add_uetg_patient():
+    """Adicionar paciente ao sistema u-ETG"""
+    try:
+        from uetg_system import uetg
+        
+        data = request.get_json()
+        
+        patient_id = uetg.add_patient(
+            name=data['name'],
+            phone_number=data['phone_number'],
+            available_times=data.get('available_times', ["12:15", "16:40", "19:00"])
+        )
+        
+        return jsonify({
+            "status": "success",
+            "message": "Paciente adicionado com sucesso",
+            "patient_id": patient_id
+        })
+        
+    except Exception as e:
+        print(f"💥 Error adding u-ETG patient: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route("/api/uetg/schedule")
+def get_uetg_schedule():
+    """Obter agenda u-ETG da semana"""
+    try:
+        from uetg_system import uetg
+        from datetime import datetime, timedelta
+        
+        # Calcular próxima segunda-feira
+        today = datetime.now().date()
+        days_until_monday = (7 - today.weekday()) % 7
+        if days_until_monday == 0:
+            days_until_monday = 7
+        next_monday = today + timedelta(days=days_until_monday)
+        
+        schedule = uetg.get_weekly_schedule(next_monday)
+        
+        # Converter para formato JSON
+        schedule_list = []
+        for item in schedule:
+            schedule_list.append({
+                'draw_id': item[0],
+                'patient_name': item[5],
+                'first_date': item[3],
+                'second_date': item[4],
+                'first_time': item[7],
+                'second_time': item[8]
+            })
+        
+        return jsonify(schedule_list)
+        
+    except Exception as e:
+        print(f"💥 Error getting u-ETG schedule: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/admin/uetg")
+def uetg_admin():
+    """Página administrativa do u-ETG"""
+    return render_template('uetg_admin.html')
+
+
 # ==================== ROTAS ADMINISTRATIVAS ====================
 
 @app.route("/admin")
