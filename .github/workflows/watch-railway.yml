@@ -47,29 +47,59 @@ jobs:
           echo "code=$CODE" >> "$GITHUB_OUTPUT"
 
       # 3) CLASSIFICAÇÃO — IndentationError / PythonError / Crash (sem stack)
-      - name: Detect errors
+            - name: Detect errors
         id: detect
         run: |
           python - <<'PY'
           import re, json
+
+          def strip_ansi(s: str) -> str:
+              return re.sub(r'\x1B\[[0-?]*[ -/]*[@-~]', '', s)
+
           txt = open("logs.txt","r",errors="ignore").read()
-          out = {"kind":"","file":"","line":"0","summary":""}
-          m = re.search(r'File "(/app/[^"]+)", line (\d+)[\s\S]+?(IndentationError:[^\n]+)', txt)
-          if m:
-              out.update(kind="IndentationError", file=m.group(1).replace("/app/",""), line=str(int(m.group(2))), summary=m.group(3).strip())
+          txt = strip_ansi(txt)
+
+          # 1) Se houver "IndentationError", capturar o bloco mais recente e o respectivo "File ... line ..."
+          kind, file, line, summary = "", "", "0", ""
+          if "IndentationError" in txt:
+              # pega a ÚLTIMA ocorrência (a mais recente)
+              ind_pos = txt.rfind("IndentationError")
+              # procura o "File "...", line N" MAIS PRÓXIMO ANTES
+              pre = txt[:ind_pos]
+              mfile = None
+              for m in re.finditer(r'File "([^"]+)", line (\d+)', pre):
+                  mfile = m  # fica com o último
+              if mfile:
+                  file = mfile.group(1)
+                  line = mfile.group(2)
+                  kind = "IndentationError"
+                  # resumo curto (linha inteira do erro)
+                  summary = txt[ind_pos: txt.find("\n", ind_pos)]
           else:
-              m2 = re.search(r'File "(/app/[^"]+)", line (\d+)[\s\S]+?\n([A-Za-z_]+Error:[^\n]+)', txt)
+              # 2) Qualquer outro PythonError com arquivo/linha
+              m2 = re.search(r'File "([^"]+)", line (\d+)[\s\S]+?\n([A-Za-z_]+Error:[^\n]+)', txt)
               if m2:
-                  out.update(kind="PythonError", file=m2.group(1).replace("/app/",""), line=str(int(m2.group(2))), summary=m2.group(3).strip())
+                  file = m2.group(1); line = m2.group(2)
+                  kind = "PythonError"
+                  summary = m2.group(3)
+
+              # 3) Sem stack, mas container parando
               elif "stopping container" in txt.lower() or "exited with code" in txt.lower():
-                  out.update(kind="Crash", summary="Container stopped/crashed — no traceback in logs")
+                  kind = "Crash"
+                  summary = "Container stopped/crashed — no traceback in logs"
+
+          # Normalizar caminho: remover prefixo /app/ se existir
+          if file.startswith("/app/"):
+              file = file[len("/app/"):]
+
+          out = {"kind":kind, "file":file, "line":line, "summary":summary}
           open("detect.json","w").write(json.dumps(out))
           PY
           echo "kind=$(jq -r .kind detect.json)" >> "$GITHUB_OUTPUT"
           echo "file=$(jq -r .file detect.json)" >> "$GITHUB_OUTPUT"
           echo "line=$(jq -r .line detect.json)" >> "$GITHUB_OUTPUT"
           echo "summary=$(jq -r .summary detect.json)" >> "$GITHUB_OUTPUT"
-
+          
       # 4) INCIDENTE — abre Issue se houver erro OU se o health != 200
       - name: Open incident (if any)
         if: ${{ steps.detect.outputs.kind != '' || steps.health.outputs.code != '200' }}
