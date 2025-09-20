@@ -399,9 +399,26 @@ def process_text_message(phone_number, text_body):
         print(f"⏹️ Cancel command received: {text_lower}")
         return cancel_questionnaire(phone_number)
     
-    # Processar seleção de horário u-ETG (formato HH:MM)
+    # Processar seleção de horário u-ETG (múltiplos formatos)
     import re
-    if re.match(r'^\d{1,2}:\d{2}$', text_body.strip()):
+    
+    # Normalizar formato de horário
+    normalized_time = None
+    text_clean = text_body.strip().lower()
+    
+    # Padrões aceitos: 19:00, 19h, 19 hs, 19
+    if re.match(r'^\d{1,2}:\d{2}$', text_clean):  # 19:00
+        normalized_time = text_clean
+    elif re.match(r'^\d{1,2}h$', text_clean):  # 19h
+        hour = text_clean.replace('h', '')
+        normalized_time = f"{hour}:00"
+    elif re.match(r'^\d{1,2}\s*hs?$', text_clean):  # 19 hs, 19 h
+        hour = re.sub(r'\s*hs?$', '', text_clean)
+        normalized_time = f"{hour}:00"
+    elif re.match(r'^\d{1,2}$', text_clean):  # 19
+        normalized_time = f"{text_clean}:00"
+    
+    if normalized_time:
         print(f"🕐 u-ETG time selection detected: {text_body}")
         try:
             from uetg_system import uetg
@@ -440,8 +457,9 @@ def process_text_message(phone_number, text_body):
                 selected_date = second_date
             
             print(f"📅 Using date: {selected_date} for time selection")
+            print(f"🕐 Normalized time: {normalized_time}")
             
-            success = uetg.process_patient_time_selection(phone_number, text_body.strip(), selected_date)
+            success = uetg.process_patient_time_selection(phone_number, normalized_time, selected_date)
             
             if success:
                 print(f"✅ Horário {text_body} confirmado para {phone_number} em {selected_date}")
