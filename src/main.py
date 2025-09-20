@@ -432,6 +432,27 @@ def process_text_message(phone_number, text_body):
             
             print(f"📱 Original phone: {phone_number}")
             print(f"📱 Normalized phone: {normalized_phone}")
+                       # Verificar se está em modo teste
+            global test_mode_patients
+            if 'test_mode_patients' not in globals():
+                test_mode_patients = set()
+            
+            is_test_mode = phone_number in test_mode_patients or normalized_phone in test_mode_patients
+            
+            if is_test_mode:
+                print(f"⚡ Test mode detected for {phone_number}")
+                # Processar como teste imediato
+                today = datetime.now().date()
+                
+                # Enviar confirmações
+                send_whatsapp_message(phone_number, f"Perfeito! hoje às {normalized_time}. Te espero! 👍")
+                send_whatsapp_message(ADMIN_PHONE_NUMBER, f"✅ Teste confirmado: hoje às {normalized_time}")
+                
+                # Remover do modo teste
+                test_mode_patients.discard(phone_number)
+                test_mode_patients.discard(normalized_phone)
+                
+                return {"status": "ok"}
             
             # Buscar sorteio ativo para este paciente
             conn = sqlite3.connect(uetg.db_path)
@@ -450,10 +471,9 @@ def process_text_message(phone_number, text_body):
             conn.close()
             
             if not draw:
-                print(f"❌ Nenhum sorteio encontrado para {phone_number}")
-                return send_whatsapp_message(phone_number, "Não encontrei um sorteio ativo para você. Entre em contato com a clínica.")
-            
-            # Determinar qual data usar (primeira ou segunda)
+                print(f"❌ No active draw found for {phone_number}")
+                send_whatsapp_message(phone_number, "Não encontrei um sorteio ativo para você. Entre em contato com a clínica.")
+                return {"status": "ok"} # Determinar qual data usar (primeira ou segunda)
             today = datetime.now().date()
             first_date = datetime.strptime(draw[3], '%Y-%m-%d').date()
             second_date = datetime.strptime(draw[4], '%Y-%m-%d').date()
@@ -892,26 +912,17 @@ def send_immediate_test_message(patient_id):
         except:
             available_times = ["12:15", "16:40", "19:00"]
         
-        # Criar sorteio temporário para hoje (modo teste)
+        # Enviar mensagem diretamente (sem criar sorteio no banco)
         today = datetime.now().date()
-        
-        # Criar entrada temporária no banco para teste
-        conn = sqlite3.connect(uetg.db_path)
-        cursor = conn.cursor()
-        
-        # Inserir sorteio temporário
-        cursor.execute('''
-            INSERT INTO uetg_weekly_draws (patient_id, first_date, second_date, created_at)
-            VALUES (?, ?, ?, ?)
-        ''', (patient_id, today.isoformat(), today.isoformat(), datetime.now().isoformat()))
-        
-        conn.commit()
-        conn.close()
-        
-        # Enviar mensagem
         success = uetg.send_patient_draw_message(patient_phone, patient_name, available_times, today)
         
         if success:
+            # Marcar globalmente que este paciente está em modo teste
+            global test_mode_patients
+            if 'test_mode_patients' not in globals():
+                test_mode_patients = set()
+            test_mode_patients.add(patient_phone)
+            
             return jsonify({
                 "status": "success",
                 "message": "Teste imediato enviado",
