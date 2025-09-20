@@ -32,12 +32,15 @@ jobs:
           sudo apt-get install -y jq curl
 
       # 1) LOG PROFUNDO — captura stack
-      - name: Fetch logs (deep)
+           - name: Fetch logs (deep)
         run: |
           export RAILWAY_TOKEN="${RAILWAY_TOKEN}"
-          railway logs --project "${RW_PROJECT_ID}" --environment "${RW_ENV_ID}" --service "${RW_SERVICE_ID}" -n 2000 --timestamps > logs.txt || true
-          echo "---- tail (120) ----"
-          tail -n 120 logs.txt || true
+          # Captura STDOUT + STDERR (2>&1) e aumenta o buffer (-n 2000)
+          railway logs --project "${RW_PROJECT_ID}" --environment "${RW_ENV_ID}" --service "${RW_SERVICE_ID}" -n 2000 --timestamps > logs.txt 2>&1 || true
+          echo "---- tail (200) ----"
+          tail -n 200 logs.txt || true
+          echo "---- size(bytes) ----"
+          wc -c logs.txt || true
 
       # 2) HEALTH-CHECK — prova de vida
       - name: Health probe
