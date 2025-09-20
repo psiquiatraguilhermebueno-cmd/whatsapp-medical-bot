@@ -33,14 +33,26 @@ jobs:
           sudo apt-get update -y
           sudo apt-get install -y jq curl
 
-      - name: Fetch logs deep
+      - name: Fetch logs deep (robust)
         run: |
+          set -e
           export RAILWAY_TOKEN="${RAILWAY_TOKEN}"
-          railway logs --project "${RW_PROJECT_ID}" --environment "${RW_ENV_ID}" --service "${RW_SERVICE_ID}" -n 2000 --timestamps > logs.txt 2>&1 || true
+          # 1) Define contexto (algumas versões exigem isso)
+          railway use --project "${RW_PROJECT_ID}" --environment "${RW_ENV_ID}" || true
+          # 2) Tenta várias assinaturas compatíveis com versões do CLI
+          (
+            railway logs --service "${RW_SERVICE_ID}" --lines 2000 --timestamps \
+            || railway logs --service "${RW_SERVICE_ID}" -n 2000 --timestamps \
+            || railway logs --lines 2000 --timestamps \
+            || railway logs -n 2000 --timestamps \
+            || railway logs
+          ) > logs.txt 2>&1 || true
           echo "---- tail (200) ----"
           tail -n 200 logs.txt || true
           echo "---- size(bytes) ----"
           wc -c logs.txt || true
+          echo "---- cli version ----"
+          railway --version || true
 
       - name: Health probe
         id: health
@@ -52,7 +64,7 @@ jobs:
         id: detect
         run: |
           python - <<'PY'
-          import re, json, os
+          import re, json
           with open("logs.txt","r",errors="ignore") as f:
               raw=f.read()
           # remove ANSI (cores)
@@ -60,29 +72,25 @@ jobs:
 
           kind=""; file=""; line="0"; summary=""
 
-          # (A) Padrão direto do stack: File "/app/src/main.py", line N
+          # (A) Stack padrão: File "/app/src/main.py", line N + IndentationError em qualquer ponto
           mA = re.search(r'File "(/app/src/main\.py)", line (\d+)', txt)
           if mA and "IndentationError" in txt:
-              file = mA.group(1)
-              line = mA.group(2)
-              kind = "IndentationError"
-              summary = "IndentationError (stack match)"
+              file, line = mA.group(1), mA.group(2)
+              kind, summary = "IndentationError", "IndentationError (stack match)"
 
-          # (B) Padrão do BOOT: Failed to load main.app: IndentationError: ... (main.py, line N)
+          # (B) Mensagem do BOOT: Failed to load main.app: IndentationError: ... (main.py, line N)
           if not kind:
               mB = re.search(r'Failed to load main\.app:\s*IndentationError:[^\(]*\(([^,]+), line (\d+)\)', txt)
               if mB:
                   fname = mB.group(1).strip()
                   line  = mB.group(2).strip()
-                  # mapear "main.py" -> "src/main.py"
                   if fname == "main.py" or fname.endswith("/main.py"):
                       file = "src/main.py"
                   else:
                       file = f"src/{fname}" if not fname.startswith("src/") else fname
-                  kind = "IndentationError"
-                  summary = "IndentationError (boot match)"
+                  kind, summary = "IndentationError", "IndentationError (boot match)"
 
-          # (C) Fallback genérico: última ocorrência de "IndentationError" + último "File ..., line N" antes
+          # (C) Fallback: última "IndentationError" + último "File ..., line N" anterior
           if not kind and "IndentationError" in txt:
               ind_pos = txt.rfind("IndentationError")
               pre = txt[:ind_pos]
@@ -90,24 +98,20 @@ jobs:
               for m in re.finditer(r'File "([^"]+)", line (\d+)', pre):
                   mfile = m
               if mfile:
-                  file = mfile.group(1)
-                  line = mfile.group(2)
-                  kind = "IndentationError"
-                  summary = "IndentationError (generic match)"
+                  file, line = mfile.group(1), mfile.group(2)
+                  kind, summary = "IndentationError", "IndentationError (generic match)"
 
           # PythonError genérico
           if not kind:
               m2 = re.search(r'File "([^"]+)", line (\d+)[\s\S]+?\n([A-Za-z_]+Error:[^\n]+)', txt)
               if m2:
-                  file = m2.group(1); line = m2.group(2)
-                  kind = "PythonError"
-                  summary = m2.group(3)
+                  file, line = m2.group(1), m2.group(2)
+                  kind, summary = "PythonError", m2.group(3)
 
           # Crash sem stack
           if not kind and ("stopping container" in txt.lower() or "exited with code" in txt.lower()):
-              kind = "Crash"; summary = "Container stopped/crashed"
+              kind, summary = "Crash", "Container stopped/crashed"
 
-          # normalizar caminho
           if file.startswith("/app/"):
               file = file[len("/app/"):]
           out={"kind":kind, "file":file, "line":line, "summary":summary}
@@ -152,10 +156,9 @@ jobs:
           lines = p.read_text(encoding="utf-8", errors="ignore").splitlines()
           if not lines: sys.exit(0)
           def ind(s): return len(s) - len(s.lstrip(" "))
-          def is_code(line): 
+          def is_code(line):
               t = line.strip()
               return t != "" and not t.startswith("#")
-          # se linha específica informada, corrige aquela; senão tenta encontrar a primeira "return ..." mal recuada
           targets = []
           if line_no:
               targets = [max(1, min(len(lines), line_no))]
@@ -165,7 +168,6 @@ jobs:
                       targets = [i]; break
           for ln in targets:
               idx = ln - 1
-              # buscar bloco (linha anterior que termina com ":")
               block_idx = idx - 1
               while block_idx >= 0:
                   s = lines[block_idx].rstrip()
