@@ -1,4 +1,5 @@
 name: watch-railway
+
 on:
   schedule:
     - cron: "*/5 * * * *"
@@ -19,39 +20,44 @@ jobs:
       META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
       WHATSAPP_PHONE_NUMBER_ID: ${{ secrets.WHATSAPP_PHONE_NUMBER_ID }}
       OPS_ALERT_PHONE: ${{ secrets.OPS_ALERT_PHONE }}
+
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Railway CLI, curl, jq
+      - name: Install Railway CLI and tools
         run: |
           npm i -g @railway/cli
-          sudo apt-get update -y && sudo apt-get install -y jq curl
+          sudo apt-get update -y
+          sudo apt-get install -y jq curl
 
       - name: Fetch logs (last 400 lines)
-        id: logs
         run: |
           export RAILWAY_TOKEN="${RAILWAY_TOKEN}"
-          railway logs -n 400 > logs.txt || true
+          railway logs --project "${RW_PROJECT_ID}" --environment "${RW_ENV_ID}" --service "${RW_SERVICE_ID}" -n 400 > logs.txt || true
           tail -n 80 logs.txt || true
 
-      - name: Detect Python errors & IndentationError target
+      - name: Detect errors
         id: detect
         run: |
-          python - << 'PY'
-import re, json, os
-txt = open("logs.txt","r",errors="ignore").read()
-out = {"kind":"", "file":"", "line":0, "summary":""}
-m = re.search(r'File "(/app/[^"]+)", line (\\d+)[\\s\\S]+?(IndentationError:[^\\n]+)', txt)
-if m:
-    out.update(kind="IndentationError", file=m.group(1).replace("/app/",""), line=int(m.group(2)), summary=m.group(3).strip())
-else:
-    m2 = re.search(r'Traceback \\(most recent call last\\):[\\s\\S]{0,2000}?File "(/app/[^"]+)", line (\\d+)[\\s\\S]+?\\n([A-Za-z]+Error:[^\\n]+)', txt)
-    if m2:
-        out.update(kind="PythonError", file=m2.group(1).replace("/app/",""), line=int(m2.group(2)), summary=m2.group(3).strip())
-print(json.dumps(out))
-PY
+          python - <<'PY'
+          import re, json
+          txt = open("logs.txt","r",errors="ignore").read()
+          out = {"kind":"","file":"","line":"0","summary":""}
+          m = re.search(r'File "(/app/[^"]+)", line (\d+)[\s\S]+?(IndentationError:[^\n]+)', txt)
+          if m:
+              out.update(kind="IndentationError", file=m.group(1).replace("/app/",""), line=str(int(m.group(2))), summary=m.group(3).strip())
+          else:
+              m2 = re.search(r'Traceback \((?:most recent call last|chamada mais recente)\):[\s\S]{0,2000}?File "(/app/[^"]+)", line (\d+)[\s\S]+?\n([A-Za-z]+Error:[^\n]+)', txt)
+              if m2:
+                  out.update(kind="PythonError", file=m2.group(1).replace("/app/",""), line=str(int(m2.group(2))), summary=m2.group(3).strip())
+          open("detect.json","w").write(json.dumps(out))
+          PY
+          echo "kind=$(jq -r .kind detect.json)" >> "$GITHUB_OUTPUT"
+          echo "file=$(jq -r .file detect.json)" >> "$GITHUB_OUTPUT"
+          echo "line=$(jq -r .line detect.json)" >> "$GITHUB_OUTPUT"
+          echo "summary=$(jq -r .summary detect.json)" >> "$GITHUB_OUTPUT"
 
-      - name: Open Incident Issue (if any)
+      - name: Open incident (if any)
         if: ${{ steps.detect.outputs.kind != '' }}
         uses: peter-evans/create-issue-from-file@v5
         with:
@@ -59,32 +65,41 @@ PY
           content-file: logs.txt
           labels: |
             auto/incident
-            python
+            runtime
 
-      - name: Attempt autofix PR (IndentationError only)
+      - name: Try autofix (indentation only)
         if: ${{ steps.detect.outputs.kind == 'IndentationError' }}
         run: |
-          python scripts/autofix/indent_fix.py "${{ steps.detect.outputs.file }}" "${{ steps.detect.outputs.line }}"
-          git config user.name "ops-bot"
-          git config user.email "ops-bot@users.noreply.github.com"
-          git checkout -b "autofix/indent-${{ steps.detect.outputs.file }}-${{ steps.detect.outputs.line }}"
-          git add -A
-          git commit -m "autofix: normalize indentation on ${{ steps.detect.outputs.file }}:${{ steps.detect.outputs.line }}"
-          git push -u origin HEAD
+          if [ -f scripts/autofix/indent_fix.py ]; then
+            python scripts/autofix/indent_fix.py "${{ steps.detect.outputs.file }}" "${{ steps.detect.outputs.line }}"
+            git config user.name "ops-bot"
+            git config user.email "ops-bot@users.noreply.github.com"
+            git checkout -b "autofix/indent-${{ steps.detect.outputs.file }}-${{ steps.detect.outputs.line }}" || git checkout "autofix/indent-${{ steps.detect.outputs.file }}-${{ steps.detect.outputs.line }}"
+            git add -A
+            git commit -m "autofix: normalize indentation on ${{ steps.detect.outputs.file }}:${{ steps.detect.outputs.line }}" || echo "No changes to commit"
+            git push -u origin HEAD
+          else
+            echo "indent_fix.py not found; skipping."
+          fi
 
       - name: Open PR for autofix
         if: ${{ steps.detect.outputs.kind == 'IndentationError' }}
         uses: peter-evans/create-pull-request@v6
         with:
-          title: "Autofix: Indentation in ${{ steps.detect.outputs.file }}:${{ steps.detect.outputs.line }}"
-          body: "Ajuste automático de indentação conforme erro detectado nos logs do Railway."
-          labels: autofix/indentation
+          base: main
           branch: "autofix/indent-${{ steps.detect.outputs.file }}-${{ steps.detect.outputs.line }}"
+          title: "Autofix: Indentation in ${{ steps.detect.outputs.file }}:${{ steps.detect.outputs.line }}"
+          body: "Correção automática de indentação detectada no runtime (Railway)."
+          labels: autofix/indentation
 
       - name: WhatsApp ping (summary)
         if: ${{ env.META_ACCESS_TOKEN != '' && env.WHATSAPP_PHONE_NUMBER_ID != '' && env.OPS_ALERT_PHONE != '' }}
+        env:
+          KIND: ${{ steps.detect.outputs.kind }}
+          FILE: ${{ steps.detect.outputs.file }}
+          LINE: ${{ steps.detect.outputs.line }}
         run: |
-          MSG="Ops Watcher: kind=${{ steps.detect.outputs.kind || 'none' }} file=${{ steps.detect.outputs.file || 'n/a' }} line=${{ steps.detect.outputs.line || 0 }}"
+          MSG="Ops Watcher: kind=${KIND:-none} file=${FILE:-n/a} line=${LINE:-0}"
           curl -s -X POST "https://graph.facebook.com/v21.0/${WHATSAPP_PHONE_NUMBER_ID}/messages" \
             -H "Authorization: Bearer ${META_ACCESS_TOKEN}" \
             -H "Content-Type: application/json" \
