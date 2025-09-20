@@ -1,22 +1,25 @@
 #!/usr/bin/env python3
 """
 WhatsApp Medical Reminder Bot
-Ponto de entrada principal para deploy
+Bootstrap resiliente para deploy em produção.
+- Mantém a inicialização do SQLite (como no seu app.py atual)
+- Garante sys.path para 'src'
+- Tenta carregar main.app; se falhar (ex.: IndentationError), cai para fix_main_clean.app; depois para simple_app.app
 """
 
 import os
 import sys
 import sqlite3
+import traceback
 
-# Adicionar src ao path
+# Adicionar src ao path (necessário para importar src/main.py como 'main')
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 def init_database():
     """Initialize SQLite database with required tables"""
-    
     db_path = 'app.db'
-    
-    # Check if database already exists and has tables
+
+    # Se já existe e tem a tabela principal, não recria
     if os.path.exists(db_path):
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
@@ -26,15 +29,13 @@ def init_database():
             print("✅ Database already initialized")
             return
         conn.close()
-    
+
     print("🚀 Initializing database...")
-    
-    # Create database and tables
+
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
-    
     try:
-        # Create tables
+        # Tabelas
         tables = [
             '''CREATE TABLE IF NOT EXISTS patients (
                 id TEXT PRIMARY KEY,
@@ -44,7 +45,6 @@ def init_database():
                 active BOOLEAN NOT NULL DEFAULT 1,
                 created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
             )''',
-            
             '''CREATE TABLE IF NOT EXISTS wa_campaigns (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
@@ -63,7 +63,6 @@ def init_database():
                 status TEXT NOT NULL DEFAULT 'active',
                 created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
             )''',
-            
             '''CREATE TABLE IF NOT EXISTS wa_campaign_recipients (
                 campaign_id TEXT NOT NULL,
                 phone_e164 TEXT NOT NULL,
@@ -71,7 +70,6 @@ def init_database():
                 PRIMARY KEY (campaign_id, phone_e164),
                 FOREIGN KEY (campaign_id) REFERENCES wa_campaigns(id) ON DELETE CASCADE
             )''',
-            
             '''CREATE TABLE IF NOT EXISTS wa_campaign_runs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 campaign_id TEXT NOT NULL,
@@ -84,11 +82,10 @@ def init_database():
                 FOREIGN KEY (campaign_id) REFERENCES wa_campaigns(id) ON DELETE CASCADE
             )'''
         ]
-        
-        for table_sql in tables:
-            cursor.execute(table_sql)
-        
-        # Create indexes
+        for sql in tables:
+            cursor.execute(sql)
+
+        # Índices
         indexes = [
             'CREATE INDEX IF NOT EXISTS idx_patients_phone ON patients(phone_e164)',
             'CREATE INDEX IF NOT EXISTS idx_patients_active ON patients(active)',
@@ -99,25 +96,49 @@ def init_database():
             'CREATE INDEX IF NOT EXISTS idx_campaign_runs_run_at ON wa_campaign_runs(run_at)',
             'CREATE INDEX IF NOT EXISTS idx_campaign_runs_status ON wa_campaign_runs(status)'
         ]
-        
-        for index_sql in indexes:
-            cursor.execute(index_sql)
-        
+        for sql in indexes:
+            cursor.execute(sql)
+
         conn.commit()
         print("✅ Database initialized successfully!")
-        
     except Exception as e:
         print(f"❌ Error initializing database: {e}")
         conn.rollback()
     finally:
         conn.close()
 
-# Initialize database before importing the app
+def _try_import(module_name: str, attr: str = "app"):
+    """Tenta importar um Flask app de um módulo e registra no stderr para aparecer nos logs do Railway."""
+    try:
+        mod = __import__(module_name, fromlist=[attr])
+        candidate = getattr(mod, attr, None)
+        if candidate is None:
+            raise RuntimeError(f"Module '{module_name}' does not expose '{attr}'")
+        print(f"[BOOT] Loaded {module_name}.{attr}", file=sys.stderr)
+        return candidate
+    except Exception as e:
+        print(f"[BOOT][WARN] Failed to load {module_name}.{attr}: {e.__class__.__name__}: {e}", file=sys.stderr)
+        traceback.print_exc()
+        return None
+
+# 1) Inicializa banco ANTES de carregar o app
 init_database()
 
-from main import app
+# 2) Caminho preferencial: src/main.py (como hoje)
+app = _try_import("main", "app")
+
+# 3) Fallback estável (arquivo já existe no seu repo)
+if app is None:
+    app = _try_import("fix_main_clean", "app")
+
+# 4) Último fallback mínimo (mantém /health e o serviço de pé)
+if app is None:
+    app = _try_import("simple_app", "app")
+
+# 5) Se até aqui falhar, explodir com mensagem clara
+if app is None:
+    raise RuntimeError("No viable Flask app could be loaded (main, fix_main_clean, simple_app all failed)")
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
-
