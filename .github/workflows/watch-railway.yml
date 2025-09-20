@@ -33,19 +33,26 @@ jobs:
           sudo apt-get update -y
           sudo apt-get install -y jq curl
 
+      - name: Railway login & link
+        run: |
+          set -e
+          # 1) login explícito
+          railway login --token "${RAILWAY_TOKEN}"
+          # 2) vincula o projeto (necessário para alguns subcomandos)
+          railway link --project "${RW_PROJECT_ID}" || true
+          # (opcional) confirma versão/identidade
+          railway --version || true
+          railway whoami || true
+
       - name: Fetch logs deep (Railway CLI 4.8.0)
         run: |
           set -e
-          export RAILWAY_TOKEN="${RAILWAY_TOKEN}"
-          # Railway 4.8.0: não tem 'use' e nem '--lines/-n' em 'logs'
-          # Coleta com service+environment e joga STDOUT+STDERR no arquivo
+          # Coleta com service+environment e captura STDOUT+STDERR
           railway logs --service "${RW_SERVICE_ID}" --environment "${RW_ENV_ID}" > logs.txt 2>&1 || true
           echo "---- tail (200) ----"
           tail -n 200 logs.txt || true
           echo "---- size(bytes) ----"
           wc -c logs.txt || true
-          echo "---- cli version ----"
-          railway --version || true
 
       - name: Health probe
         id: health
@@ -65,7 +72,7 @@ jobs:
 
           kind=""; file=""; line="0"; summary=""
 
-          # (A) Stack padrão: File "/app/src/main.py", line N + IndentationError em qualquer ponto
+          # (A) Stack padrão: File "/app/src/main.py", line N + IndentationError
           mA = re.search(r'File "(/app/src/main\.py)", line (\d+)', txt)
           if mA and "IndentationError" in txt:
               file, line = mA.group(1), mA.group(2)
@@ -83,7 +90,7 @@ jobs:
                       file = f"src/{fname}" if not fname.startswith("src/") else fname
                   kind, summary = "IndentationError", "IndentationError (boot match)"
 
-          # (C) Fallback: última "IndentationError" + último "File ..., line N" anterior
+          # (C) Fallback genérico: última "IndentationError" + último "File ..., line N" anterior
           if not kind and "IndentationError" in txt:
               ind_pos = txt.rfind("IndentationError")
               pre = txt[:ind_pos]
@@ -107,7 +114,7 @@ jobs:
 
           if file.startswith("/app/"):
               file = file[len("/app/"):]
-          out={"kind":kind,"file":file,"line":line,"summary":summary}
+          out={"kind":kind, "file":file, "line":line, "summary":summary}
           open("detect.json","w").write(json.dumps(out))
           PY
           echo "kind=$(jq -r .kind detect.json)" >> "$GITHUB_OUTPUT"
