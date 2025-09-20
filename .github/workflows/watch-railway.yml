@@ -52,44 +52,65 @@ jobs:
         id: detect
         run: |
           python - <<'PY'
-          import re, json
+          import re, json, os
           with open("logs.txt","r",errors="ignore") as f:
-              txt=f.read()
-          # remove códigos ANSI (cores)
-          txt = re.sub(r'\x1B\[[0-?]*[ -/]*[@-~]', '', txt)
+              raw=f.read()
+          # remove ANSI (cores)
+          txt = re.sub(r'\x1B\[[0-?]*[ -/]*[@-~]', '', raw)
+
           kind=""; file=""; line="0"; summary=""
 
-          # 1) IndentationError: pega a ÚLTIMA ocorrência e associa ao "File ..., line N" imediatamente anterior
-          if "IndentationError" in txt:
+          # (A) Padrão direto do stack: File "/app/src/main.py", line N
+          mA = re.search(r'File "(/app/src/main\.py)", line (\d+)', txt)
+          if mA and "IndentationError" in txt:
+              file = mA.group(1)
+              line = mA.group(2)
+              kind = "IndentationError"
+              summary = "IndentationError (stack match)"
+
+          # (B) Padrão do BOOT: Failed to load main.app: IndentationError: ... (main.py, line N)
+          if not kind:
+              mB = re.search(r'Failed to load main\.app:\s*IndentationError:[^\(]*\(([^,]+), line (\d+)\)', txt)
+              if mB:
+                  fname = mB.group(1).strip()
+                  line  = mB.group(2).strip()
+                  # mapear "main.py" -> "src/main.py"
+                  if fname == "main.py" or fname.endswith("/main.py"):
+                      file = "src/main.py"
+                  else:
+                      file = f"src/{fname}" if not fname.startswith("src/") else fname
+                  kind = "IndentationError"
+                  summary = "IndentationError (boot match)"
+
+          # (C) Fallback genérico: última ocorrência de "IndentationError" + último "File ..., line N" antes
+          if not kind and "IndentationError" in txt:
               ind_pos = txt.rfind("IndentationError")
               pre = txt[:ind_pos]
-              mfile=None
+              mfile = None
               for m in re.finditer(r'File "([^"]+)", line (\d+)', pre):
-                  mfile=m
+                  mfile = m
               if mfile:
-                  file=mfile.group(1)
-                  line=mfile.group(2)
-                  kind="IndentationError"
-                  summary="IndentationError"
+                  file = mfile.group(1)
+                  line = mfile.group(2)
+                  kind = "IndentationError"
+                  summary = "IndentationError (generic match)"
 
-          # 2) Outros PythonError com arquivo/linha
+          # PythonError genérico
           if not kind:
               m2 = re.search(r'File "([^"]+)", line (\d+)[\s\S]+?\n([A-Za-z_]+Error:[^\n]+)', txt)
               if m2:
-                  file=m2.group(1)
-                  line=m2.group(2)
-                  kind="PythonError"
-                  summary=m2.group(3)
+                  file = m2.group(1); line = m2.group(2)
+                  kind = "PythonError"
+                  summary = m2.group(3)
 
-          # 3) Sem stack mas container parando
+          # Crash sem stack
           if not kind and ("stopping container" in txt.lower() or "exited with code" in txt.lower()):
-              kind="Crash"
-              summary="Container stopped/crashed"
+              kind = "Crash"; summary = "Container stopped/crashed"
 
-          # normaliza caminho
+          # normalizar caminho
           if file.startswith("/app/"):
-              file=file[len("/app/"):]
-          out={"kind":kind,"file":file,"line":line,"summary":summary}
+              file = file[len("/app/"):]
+          out={"kind":kind, "file":file, "line":line, "summary":summary}
           open("detect.json","w").write(json.dumps(out))
           PY
           echo "kind=$(jq -r .kind detect.json)" >> "$GITHUB_OUTPUT"
@@ -123,39 +144,38 @@ jobs:
           mkdir -p scripts/autofix
           cat > scripts/autofix/indent_fix.py <<'PY'
           #!/usr/bin/env python3
-          # Corrige a indentação de UMA linha problemática alinhando-a ao bloco correto.
           import sys, pathlib
-          if len(sys.argv) < 3:
+          if len(sys.argv) < 2:
               sys.exit(2)
           p = pathlib.Path(sys.argv[1])
-          line_no = int(sys.argv[2])  # 1-based
+          line_no = int(sys.argv[2]) if len(sys.argv) > 2 else None
           lines = p.read_text(encoding="utf-8", errors="ignore").splitlines()
-          idx = max(0, min(len(lines)-1, line_no-1))
-          def ind(s: str) -> int:
-              return len(s) - len(s.lstrip(" "))
-          def is_code(line: str) -> bool:
+          if not lines: sys.exit(0)
+          def ind(s): return len(s) - len(s.lstrip(" "))
+          def is_code(line): 
               t = line.strip()
               return t != "" and not t.startswith("#")
-          # Busca o início do bloco acima (linha que termina com ":")
-          block_idx = idx - 1
-          while block_idx >= 0:
-              s = lines[block_idx].rstrip()
-              if is_code(s) and s.endswith(":"):
-                  break
-              block_idx -= 1
-          target_indent = 0
-          if block_idx >= 0:
-              target_indent = ind(lines[block_idx]) + 4  # um nível dentro do bloco
+          # se linha específica informada, corrige aquela; senão tenta encontrar a primeira "return ..." mal recuada
+          targets = []
+          if line_no:
+              targets = [max(1, min(len(lines), line_no))]
           else:
-              prev = idx - 1
-              while prev >= 0 and not is_code(lines[prev]):
-                  prev -= 1
-              if prev >= 0:
-                  target_indent = ind(lines[prev])
-          cur_stripped = lines[idx].lstrip(" ")
-          lines[idx] = (" " * target_indent) + cur_stripped
+              for i, s in enumerate(lines, start=1):
+                  if s.lstrip().startswith("return ") and (i == 1 or ind(s) % 4 != 0):
+                      targets = [i]; break
+          for ln in targets:
+              idx = ln - 1
+              # buscar bloco (linha anterior que termina com ":")
+              block_idx = idx - 1
+              while block_idx >= 0:
+                  s = lines[block_idx].rstrip()
+                  if is_code(s) and s.endswith(":"):
+                      break
+                  block_idx -= 1
+              target_indent = ind(lines[block_idx]) + 4 if block_idx >= 0 else 0
+              lines[idx] = (" " * target_indent) + lines[idx].lstrip(" ")
           p.write_text("\n".join(lines) + ("\n" if not lines[-1].endswith("\n") else ""), encoding="utf-8")
-          print(f"fixed {p}:{line_no} -> indent {target_indent}")
+          print(f"fixed {p} at lines {targets}")
           PY
           chmod +x scripts/autofix/indent_fix.py
 
