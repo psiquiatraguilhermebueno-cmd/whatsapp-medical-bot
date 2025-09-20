@@ -25,61 +25,55 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Railway CLI and tools
+      - name: Install tools
         run: |
           npm i -g @railway/cli
           sudo apt-get update -y
           sudo apt-get install -y jq curl
 
-      # 1) LOG PROFUNDO — captura stack
-           - name: Fetch logs (deep)
+      - name: Fetch logs deep
         run: |
           export RAILWAY_TOKEN="${RAILWAY_TOKEN}"
-          # Captura STDOUT + STDERR (2>&1) e aumenta o buffer (-n 2000)
           railway logs --project "${RW_PROJECT_ID}" --environment "${RW_ENV_ID}" --service "${RW_SERVICE_ID}" -n 2000 --timestamps > logs.txt 2>&1 || true
           echo "---- tail (200) ----"
           tail -n 200 logs.txt || true
           echo "---- size(bytes) ----"
           wc -c logs.txt || true
 
-      # 2) HEALTH-CHECK — prova de vida
       - name: Health probe
         id: health
         run: |
           CODE=$(curl -s -o /dev/null -w "%{http_code}" "${POST_DEPLOY_URL}/health" || echo "000")
           echo "code=$CODE" >> "$GITHUB_OUTPUT"
 
-      # 3) CLASSIFICAÇÃO — IndentationError / PythonError / Crash (sem stack)
       - name: Detect errors
         id: detect
         run: |
           python - <<'PY'
           import re, json
-          def strip_ansi(s): return re.sub(r'\x1B\[[0-?]*[ -/]*[@-~]', '', s)
-          txt = open("logs.txt","r",errors="ignore").read()
-          txt = strip_ansi(txt)
-          kind, file, line, summary = "", "", "0", ""
+          with open("logs.txt","r",errors="ignore") as f:
+              txt=f.read()
+          # remove códigos de cor ANSI
+          txt = re.sub(r'\x1B\[[0-?]*[ -/]*[@-~]', '', txt)
+          kind=""; file=""; line="0"; summary=""
           if "IndentationError" in txt:
               ind_pos = txt.rfind("IndentationError")
               pre = txt[:ind_pos]
-              mfile = None
+              mfile=None
               for m in re.finditer(r'File "([^"]+)", line (\d+)', pre):
-                  mfile = m
+                  mfile=m
               if mfile:
-                  file, line = mfile.group(1), mfile.group(2)
-                  kind = "IndentationError"
-                  summary = txt[ind_pos: txt.find("\n", ind_pos)]
+                  file=mfile.group(1); line=mfile.group(2); kind="IndentationError"
+                  summary="IndentationError"
           if not kind:
               m2 = re.search(r'File "([^"]+)", line (\d+)[\s\S]+?\n([A-Za-z_]+Error:[^\n]+)', txt)
               if m2:
-                  file, line, kind = m2.group(1), m2.group(2), "PythonError"
-                  summary = m2.group(3)
+                  file=m2.group(1); line=m2.group(2); kind="PythonError"; summary=m2.group(3)
           if not kind and ("stopping container" in txt.lower() or "exited with code" in txt.lower()):
-              kind = "Crash"
-              summary = "Container stopped/crashed — no traceback in logs"
+              kind="Crash"; summary="Container stopped/crashed"
           if file.startswith("/app/"):
-              file = file[len("/app/"):]
-          out = {"kind":kind, "file":file, "line":line, "summary":summary}
+              file=file[len("/app/"):]
+          out={"kind":kind,"file":file,"line":line,"summary":summary}
           open("detect.json","w").write(json.dumps(out))
           PY
           echo "kind=$(jq -r .kind detect.json)" >> "$GITHUB_OUTPUT"
@@ -87,56 +81,52 @@ jobs:
           echo "line=$(jq -r .line detect.json)" >> "$GITHUB_OUTPUT"
           echo "summary=$(jq -r .summary detect.json)" >> "$GITHUB_OUTPUT"
 
-      # 4A) INCIDENTE por erro (tem stack)
-      - name: Open incident (error)
+      - name: Open error incident
         if: ${{ steps.detect.outputs.kind != '' }}
         uses: peter-evans/create-issue-from-file@v5
         with:
-          title: "Auto-incident: ${{ steps.detect.outputs.kind }} in ${{ steps.detect.outputs.file }}:${{ steps.detect.outputs.line }}"
+          title: Auto-incident: ${{ steps.detect.outputs.kind }} in ${{ steps.detect.outputs.file }}:${{ steps.detect.outputs.line }}
           content-file: logs.txt
           labels: |
             auto/incident
             runtime
 
-      # 4B) INCIDENTE só de saúde (sem stack, health != 200)
-      - name: Open incident (health)
+      - name: Open health incident
         if: ${{ steps.detect.outputs.kind == '' && steps.health.outputs.code != '200' }}
         uses: peter-evans/create-issue-from-file@v5
         with:
-          title: "Auto-incident: Health (code=${{ steps.health.outputs.code }})"
+          title: Auto-incident: Health (code=${{ steps.health.outputs.code }})
           content-file: logs.txt
           labels: |
             auto/incident
             runtime
 
-      # 5) PR AUTOMÁTICO — apenas para IndentationError
-      - name: Try autofix (indentation only)
+      - name: Try autofix indentation
         if: ${{ steps.detect.outputs.kind == 'IndentationError' }}
         run: |
           if [ -f scripts/autofix/indent_fix.py ]; then
-            python scripts/autofix/indent_fix.py "${{ steps.detect.outputs.file }}" "${{ steps.detect.outputs.line }}"
+            python scripts/autofix/indent_fix.py "${{ steps.detect.outputs.file }}" "${{ steps.detect.outputs.line }}" || true
             git config user.name "ops-bot"
             git config user.email "ops-bot@users.noreply.github.com"
             git checkout -b "autofix/indent-${{ steps.detect.outputs.file }}-${{ steps.detect.outputs.line }}" || git checkout "autofix/indent-${{ steps.detect.outputs.file }}-${{ steps.detect.outputs.line }}"
             git add -A
             git commit -m "autofix: normalize indentation on ${{ steps.detect.outputs.file }}:${{ steps.detect.outputs.line }}" || echo "No changes to commit"
-            git push -u origin HEAD
+            git push -u origin HEAD || true
           else
-            echo "indent_fix.py not found; skipping."
+            echo "indent_fix.py not found"
           fi
 
-      - name: Open PR for autofix
+      - name: Open PR
         if: ${{ steps.detect.outputs.kind == 'IndentationError' }}
         uses: peter-evans/create-pull-request@v6
         with:
           base: main
-          branch: "autofix/indent-${{ steps.detect.outputs.file }}-${{ steps.detect.outputs.line }}"
-          title: "Autofix: Indentation in ${{ steps.detect.outputs.file }}:${{ steps.detect.outputs.line }}"
-          body: "Correção automática de indentação detectada no runtime (Railway)."
+          branch: autofix/indent-${{ steps.detect.outputs.file }}-${{ steps.detect.outputs.line }}
+          title: Autofix: Indentation in ${{ steps.detect.outputs.file }}:${{ steps.detect.outputs.line }}
+          body: Correção automática de indentação detectada no runtime (Railway).
           labels: autofix/indentation
 
-      # 6) RESUMO NO WHATSAPP
-      - name: WhatsApp ping (summary)
+      - name: WhatsApp ping
         if: ${{ env.META_ACCESS_TOKEN != '' && env.WHATSAPP_PHONE_NUMBER_ID != '' && env.OPS_ALERT_PHONE != '' }}
         env:
           KIND: ${{ steps.detect.outputs.kind }}
