@@ -399,6 +399,29 @@ def process_text_message(phone_number, text_body):
         print(f"⏹️ Cancel command received: {text_lower}")
         return cancel_questionnaire(phone_number)
     
+    # Processar seleção de horário u-ETG (formato HH:MM)
+    import re
+    if re.match(r'^\d{1,2}:\d{2}$', text_body.strip()):
+        print(f"🕐 u-ETG time selection detected: {text_body}")
+        try:
+            from uetg_system import uetg
+            from datetime import datetime
+            
+            # Assumir que é para hoje (lógica pode ser melhorada)
+            today = datetime.now().date()
+            success = uetg.process_patient_time_selection(phone_number, text_body.strip(), today)
+            
+            if success:
+                print(f"✅ Horário {text_body} confirmado para {phone_number}")
+            else:
+                print(f"❌ Falha ao processar horário {text_body} para {phone_number}")
+            
+            return True
+            
+        except Exception as e:
+            print(f"💥 Error processing u-ETG time selection: {e}")
+            return False
+    
     # Comandos específicos
     # Tentar handler de emergência primeiro
     if emergency_gad7_handler(phone_number, text_body):
