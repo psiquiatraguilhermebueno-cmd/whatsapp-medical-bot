@@ -442,12 +442,18 @@ def process_text_message(phone_number, text_body):
             
             if is_test_mode:
                 print(f"⚡ Test mode detected for {phone_number}")
+                print(f"📱 Admin phone configured as: {ADMIN_PHONE_NUMBER}")
                 # Processar como teste imediato
                 today = datetime.now().date()
                 
                 # Enviar confirmações
-                send_whatsapp_message(phone_number, f"Perfeito! hoje às {normalized_time}. Te espero! 👍")
-                send_whatsapp_message(ADMIN_PHONE_NUMBER, f"✅ Teste confirmado: hoje às {normalized_time}")
+                print(f"📤 Sending patient confirmation to {phone_number}")
+                patient_success = send_whatsapp_message(phone_number, f"Perfeito! hoje às {normalized_time}. Te espero! 👍")
+                print(f"📤 Patient message result: {patient_success}")
+                
+                print(f"📤 Sending admin notification to {ADMIN_PHONE_NUMBER}")
+                admin_success = send_whatsapp_message(ADMIN_PHONE_NUMBER, f"✅ Teste confirmado: hoje às {normalized_time}")
+                print(f"📤 Admin message result: {admin_success}")
                 
                 # Remover do modo teste
                 test_mode_patients.discard(phone_number)
