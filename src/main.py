@@ -864,6 +864,66 @@ def send_test_uetg_message(patient_id):
         print(f"💥 Error sending test message: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
+@app.route("/api/uetg/send-immediate-test/<int:patient_id>", methods=['POST'])
+def send_immediate_test_message(patient_id):
+    """Enviar teste imediato u-ETG (ignora datas)"""
+    try:
+        from uetg_system import uetg
+        from datetime import datetime
+        import sqlite3
+        import json
+        
+        # Buscar dados do paciente
+        conn = sqlite3.connect(uetg.db_path)
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM uetg_patients WHERE id = ? AND is_active = 1', (patient_id,))
+        patient = cursor.fetchone()
+        conn.close()
+        
+        if not patient:
+            return jsonify({"status": "error", "message": "Paciente não encontrado"}), 404
+        
+        patient_name = patient[1]
+        patient_phone = patient[2]
+        
+        # Tentar fazer parse dos horários
+        try:
+            available_times = json.loads(patient[4])
+        except:
+            available_times = ["12:15", "16:40", "19:00"]
+        
+        # Criar sorteio temporário para hoje (modo teste)
+        today = datetime.now().date()
+        
+        # Criar entrada temporária no banco para teste
+        conn = sqlite3.connect(uetg.db_path)
+        cursor = conn.cursor()
+        
+        # Inserir sorteio temporário
+        cursor.execute('''
+            INSERT INTO uetg_weekly_draws (patient_id, first_date, second_date, created_at)
+            VALUES (?, ?, ?, ?)
+        ''', (patient_id, today.isoformat(), today.isoformat(), datetime.now().isoformat()))
+        
+        conn.commit()
+        conn.close()
+        
+        # Enviar mensagem
+        success = uetg.send_patient_draw_message(patient_phone, patient_name, available_times, today)
+        
+        if success:
+            return jsonify({
+                "status": "success",
+                "message": "Teste imediato enviado",
+                "patient_name": patient_name
+            })
+        else:
+            return jsonify({"status": "error", "message": "Falha ao enviar teste imediato"}), 500
+            
+    except Exception as e:
+        print(f"💥 Error sending immediate test: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
 
 # ==================== ROTAS ADMINISTRATIVAS ====================
 

@@ -352,6 +352,7 @@
                 <button class="btn btn-primary" onclick="generateDraw()">🎲 Gerar Sorteio</button>
                 <button class="btn btn-secondary" onclick="loadSchedule()">🔄 Atualizar Agenda</button>
                 <button class="btn btn-primary" onclick="sendTestMessage()">📱 Enviar Mensagem Teste</button>
+                <button class="btn btn-success" onclick="sendImmediateTest()">⚡ Teste Imediato</button>
             </div>
         </div>
 
@@ -529,6 +530,34 @@
             } catch (error) {
                 console.error('Erro:', error);
                 showAlert('Erro ao enviar mensagem.', 'error');
+            }
+        }
+
+        // Teste imediato (ignora datas)
+        async function sendImmediateTest() {
+            const patientId = document.getElementById('patientSelect').value;
+            
+            if (!patientId) {
+                showAlert('Selecione um paciente primeiro.', 'error');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/uetg/send-immediate-test/${patientId}`, {
+                    method: 'POST'
+                });
+                
+                const result = await response.json();
+                
+                if (result.status === 'success') {
+                    showAlert(`⚡ Teste imediato enviado para ${result.patient_name}! Responda com qualquer horário para testar o fluxo completo.`, 'success');
+                } else {
+                    showAlert('Erro ao enviar teste imediato: ' + result.message, 'error');
+                }
+                
+            } catch (error) {
+                console.error('Erro:', error);
+                showAlert('Erro ao enviar teste imediato.', 'error');
             }
         }
 
