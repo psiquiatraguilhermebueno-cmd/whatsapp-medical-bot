@@ -1,0 +1,99 @@
+name: ci-autofix-indent
+
+on:
+  workflow_run:
+    workflows: ["ci"]
+    types: [completed]
+
+jobs:
+  autofix:
+    if: ${{ github.event.workflow_run.conclusion == 'failure' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # Garante que o script de correção exista (se já existir, reescreve igual)
+      - name: Ensure indent_fix.py
+        run: |
+          mkdir -p scripts/autofix
+          cat > scripts/autofix/indent_fix.py <<'PY'
+          #!/usr/bin/env python3
+          import sys, pathlib
+          if len(sys.argv) < 3:
+              sys.exit(2)
+          p = pathlib.Path(sys.argv[1]); line_no = int(sys.argv[2])
+          txt = p.read_text(encoding="utf-8", errors="ignore").splitlines()
+          idx = max(0, min(len(txt)-1, line_no-1))
+          def indent(s): return len(s) - len(s.lstrip(" "))
+          # tenta alinhar com a linha anterior "boa"
+          ref = idx-1
+          while ref >= 0 and (txt[ref].strip()=="" or txt[ref].lstrip().startswith("#")):
+              ref -= 1
+          if ref >= 0:
+              ref_indent = indent(txt[ref])
+              cur = txt[idx].lstrip(" ")
+              txt[idx] = (" " * ref_indent) + cur
+              p.write_text("\n".join(txt) + ("\n" if not txt[-1].endswith("\n") else ""), encoding="utf-8")
+          PY
+          chmod +x scripts/autofix/indent_fix.py
+
+      # Reproduz o erro do CI e captura quais arquivos/linhas quebraram
+      - name: Detect IndentationError via py_compile
+        id: detect
+        run: |
+          python - << 'PY'
+          import sys, subprocess, json, re
+          from pathlib import Path
+          files = subprocess.check_output(["git","ls-files","*.py"]).decode().splitlines()
+          p = subprocess.run([sys.executable,"-m","py_compile",*files], capture_output=True, text=True)
+          log = p.stderr or p.stdout or ""
+          Path("pyc.log").write_text(log, encoding="utf-8")
+          findings=[]
+          # Ex.: File "src/main.py", line 1290 ... IndentationError: unexpected indent
+          pat = re.compile(r'File "([^"]+)", line (\\d+)[\\s\\S]*?IndentationError:', re.M)
+          for m in pat.finditer(log):
+              f = m.group(1)
+              if f.startswith("./"): f = f[2:]
+              findings.append({"file": f, "line": int(m.group(2))})
+          Path("findings.json").write_text(json.dumps(findings), encoding="utf-8")
+          print(f"found={len(findings)}")
+          PY
+
+      - name: Prepare branch
+        run: |
+          git config user.name "ops-bot"
+          git config user.email "ops-bot@users.noreply.github.com"
+          git checkout -b "autofix/indent-ci" || git checkout "autofix/indent-ci"
+
+      - name: Apply fixes
+        run: |
+          if [ ! -s findings.json ]; then
+            echo "No findings to fix"; exit 0
+          fi
+          count=$(jq 'length' findings.json)
+          i=0
+          while [ $i -lt $count ]; do
+            file=$(jq -r ".[$i].file" findings.json)
+            line=$(jq -r ".[$i].line" findings.json)
+            echo "Fixing $file:$line"
+            python scripts/autofix/indent_fix.py "$file" "$line" || true
+            i=$((i+1))
+          done
+          git add -A || true
+          git commit -m "autofix(ci): normalize indentation on files detected by py_compile" || echo "No changes"
+
+      - name: Create PR
+        uses: peter-evans/create-pull-request@v6
+        with:
+          title: "Autofix (CI): normalize indentation"
+          body: "Correção automática de indentação baseada no py_compile do CI."
+          labels: autofix/indentation
+          branch: "autofix/indent-ci"
