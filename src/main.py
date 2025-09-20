@@ -405,14 +405,46 @@ def process_text_message(phone_number, text_body):
         print(f"🕐 u-ETG time selection detected: {text_body}")
         try:
             from uetg_system import uetg
-            from datetime import datetime
+            from datetime import datetime, timedelta
+            import sqlite3
             
-            # Assumir que é para hoje (lógica pode ser melhorada)
+            # Buscar sorteio ativo para este paciente
+            conn = sqlite3.connect(uetg.db_path)
+            cursor = conn.cursor()
+            
+            # Buscar sorteios recentes (últimos 7 dias)
+            week_ago = datetime.now().date() - timedelta(days=7)
+            cursor.execute('''
+                SELECT d.*, p.name FROM uetg_weekly_draws d
+                JOIN uetg_patients p ON d.patient_id = p.id
+                WHERE p.phone_number = ? AND d.created_at >= ?
+                ORDER BY d.created_at DESC LIMIT 1
+            ''', (phone_number, week_ago))
+            
+            draw = cursor.fetchone()
+            conn.close()
+            
+            if not draw:
+                print(f"❌ Nenhum sorteio encontrado para {phone_number}")
+                return send_whatsapp_message(phone_number, "Não encontrei um sorteio ativo para você. Entre em contato com a clínica.")
+            
+            # Determinar qual data usar (primeira ou segunda)
             today = datetime.now().date()
-            success = uetg.process_patient_time_selection(phone_number, text_body.strip(), today)
+            first_date = datetime.strptime(draw[3], '%Y-%m-%d').date()
+            second_date = datetime.strptime(draw[4], '%Y-%m-%d').date()
+            
+            # Escolher a data mais próxima de hoje
+            if abs((first_date - today).days) <= abs((second_date - today).days):
+                selected_date = first_date
+            else:
+                selected_date = second_date
+            
+            print(f"📅 Using date: {selected_date} for time selection")
+            
+            success = uetg.process_patient_time_selection(phone_number, text_body.strip(), selected_date)
             
             if success:
-                print(f"✅ Horário {text_body} confirmado para {phone_number}")
+                print(f"✅ Horário {text_body} confirmado para {phone_number} em {selected_date}")
             else:
                 print(f"❌ Falha ao processar horário {text_body} para {phone_number}")
             
@@ -420,6 +452,8 @@ def process_text_message(phone_number, text_body):
             
         except Exception as e:
             print(f"💥 Error processing u-ETG time selection: {e}")
+            import traceback
+            traceback.print_exc()
             return False
     
     # Comandos específicos
