@@ -20,6 +20,7 @@ jobs:
       META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
       WHATSAPP_PHONE_NUMBER_ID: ${{ secrets.WHATSAPP_PHONE_NUMBER_ID }}
       OPS_ALERT_PHONE: ${{ secrets.OPS_ALERT_PHONE }}
+      POST_DEPLOY_URL: ${{ secrets.POST_DEPLOY_URL }}
 
     steps:
       - uses: actions/checkout@v4
@@ -30,12 +31,22 @@ jobs:
           sudo apt-get update -y
           sudo apt-get install -y jq curl
 
-      - name: Fetch logs (last 400 lines)
+      # 1) LOG PROFUNDO — captura stack mesmo quando o Railway só mostra "stopping container"
+      - name: Fetch logs (deep)
         run: |
           export RAILWAY_TOKEN="${RAILWAY_TOKEN}"
-          railway logs --project "${RW_PROJECT_ID}" --environment "${RW_ENV_ID}" --service "${RW_SERVICE_ID}" -n 400 > logs.txt || true
-          tail -n 80 logs.txt || true
+          railway logs --project "${RW_PROJECT_ID}" --environment "${RW_ENV_ID}" --service "${RW_SERVICE_ID}" -n 2000 --timestamps > logs.txt || true
+          echo "---- tail (120) ----"
+          tail -n 120 logs.txt || true
 
+      # 2) HEALTH-CHECK — prova de vida da app publicada
+      - name: Health probe
+        id: health
+        run: |
+          CODE=$(curl -s -o /dev/null -w "%{http_code}" "${POST_DEPLOY_URL}/health" || echo "000")
+          echo "code=$CODE" >> "$GITHUB_OUTPUT"
+
+      # 3) CLASSIFICAÇÃO — IndentationError / PythonError / Crash (sem stack)
       - name: Detect errors
         id: detect
         run: |
@@ -47,9 +58,11 @@ jobs:
           if m:
               out.update(kind="IndentationError", file=m.group(1).replace("/app/",""), line=str(int(m.group(2))), summary=m.group(3).strip())
           else:
-              m2 = re.search(r'Traceback \((?:most recent call last|chamada mais recente)\):[\s\S]{0,2000}?File "(/app/[^"]+)", line (\d+)[\s\S]+?\n([A-Za-z]+Error:[^\n]+)', txt)
+              m2 = re.search(r'File "(/app/[^"]+)", line (\d+)[\s\S]+?\n([A-Za-z_]+Error:[^\n]+)', txt)
               if m2:
                   out.update(kind="PythonError", file=m2.group(1).replace("/app/",""), line=str(int(m2.group(2))), summary=m2.group(3).strip())
+              elif "stopping container" in txt.lower() or "exited with code" in txt.lower():
+                  out.update(kind="Crash", summary="Container stopped/crashed — no traceback in logs")
           open("detect.json","w").write(json.dumps(out))
           PY
           echo "kind=$(jq -r .kind detect.json)" >> "$GITHUB_OUTPUT"
@@ -57,16 +70,18 @@ jobs:
           echo "line=$(jq -r .line detect.json)" >> "$GITHUB_OUTPUT"
           echo "summary=$(jq -r .summary detect.json)" >> "$GITHUB_OUTPUT"
 
+      # 4) INCIDENTE — abre Issue se houver erro OU se o health != 200
       - name: Open incident (if any)
-        if: ${{ steps.detect.outputs.kind != '' }}
+        if: ${{ steps.detect.outputs.kind != '' || steps.health.outputs.code != '200' }}
         uses: peter-evans/create-issue-from-file@v5
         with:
-          title: "Auto-incident: ${{ steps.detect.outputs.kind }} in ${{ steps.detect.outputs.file }}:${{ steps.detect.outputs.line }}"
+          title: "Auto-incident: ${{ steps.detect.outputs.kind != '' && steps.detect.outputs.kind || 'Health ' }} (code=${{ steps.health.outputs.code }}) ${{ steps.detect.outputs.file != '' && format('in {0}:{1}', steps.detect.outputs.file, steps.detect.outputs.line) || '' }}"
           content-file: logs.txt
           labels: |
             auto/incident
             runtime
 
+      # 5) PR AUTOMÁTICO — só para IndentationError (correção trivial, segura)
       - name: Try autofix (indentation only)
         if: ${{ steps.detect.outputs.kind == 'IndentationError' }}
         run: |
@@ -92,14 +107,16 @@ jobs:
           body: "Correção automática de indentação detectada no runtime (Railway)."
           labels: autofix/indentation
 
+      # 6) RESUMO NO WHATSAPP — incluindo o status do health
       - name: WhatsApp ping (summary)
         if: ${{ env.META_ACCESS_TOKEN != '' && env.WHATSAPP_PHONE_NUMBER_ID != '' && env.OPS_ALERT_PHONE != '' }}
         env:
           KIND: ${{ steps.detect.outputs.kind }}
           FILE: ${{ steps.detect.outputs.file }}
           LINE: ${{ steps.detect.outputs.line }}
+          HCODE: ${{ steps.health.outputs.code }}
         run: |
-          MSG="Ops Watcher: kind=${KIND:-none} file=${FILE:-n/a} line=${LINE:-0}"
+          MSG="Ops Watcher: kind=${KIND:-none} file=${FILE:-n/a} line=${LINE:-0} health=${HCODE:-000}"
           curl -s -X POST "https://graph.facebook.com/v21.0/${WHATSAPP_PHONE_NUMBER_ID}/messages" \
             -H "Authorization: Bearer ${META_ACCESS_TOKEN}" \
             -H "Content-Type: application/json" \
