@@ -743,6 +743,7 @@ def send_test_uetg_message(patient_id):
         from uetg_system import uetg
         from datetime import datetime
         import sqlite3
+        import json
         
         # Buscar dados do paciente
         conn = sqlite3.connect(uetg.db_path)
