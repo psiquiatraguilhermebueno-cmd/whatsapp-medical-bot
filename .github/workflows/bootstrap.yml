@@ -1,0 +1,20 @@
+name: bootstrap-ops-hub
+on:
+  push:
+    branches: [ "main", "master" ]
+jobs:
+  create-ops-hub-issue:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create Ops Hub (only if not exists)
+        uses: peter-evans/create-issue-from-file@v5
+        with:
+          title: "🧭 Ops Hub — whatsapp-medical-bot"
+          content-file: .github/ops/ops_hub_template.md
+          labels: |
+            ops
+            hub
