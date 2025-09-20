@@ -1,0 +1,92 @@
+name: watch-railway
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+jobs:
+  watch-and-act:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    env:
+      RW_PROJECT_ID: ${{ secrets.RW_PROJECT_ID }}
+      RW_ENV_ID: ${{ secrets.RW_ENV_ID }}
+      RW_SERVICE_ID: ${{ secrets.RW_SERVICE_ID }}
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+      WHATSAPP_PHONE_NUMBER_ID: ${{ secrets.WHATSAPP_PHONE_NUMBER_ID }}
+      OPS_ALERT_PHONE: ${{ secrets.OPS_ALERT_PHONE }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Railway CLI, curl, jq
+        run: |
+          npm i -g @railway/cli
+          sudo apt-get update -y && sudo apt-get install -y jq curl
+
+      - name: Fetch logs (last 400 lines)
+        id: logs
+        run: |
+          export RAILWAY_TOKEN="${RAILWAY_TOKEN}"
+          railway logs -n 400 > logs.txt || true
+          tail -n 80 logs.txt || true
+
+      - name: Detect Python errors & IndentationError target
+        id: detect
+        run: |
+          python - << 'PY'
+import re, json, os
+txt = open("logs.txt","r",errors="ignore").read()
+out = {"kind":"", "file":"", "line":0, "summary":""}
+m = re.search(r'File "(/app/[^"]+)", line (\\d+)[\\s\\S]+?(IndentationError:[^\\n]+)', txt)
+if m:
+    out.update(kind="IndentationError", file=m.group(1).replace("/app/",""), line=int(m.group(2)), summary=m.group(3).strip())
+else:
+    m2 = re.search(r'Traceback \\(most recent call last\\):[\\s\\S]{0,2000}?File "(/app/[^"]+)", line (\\d+)[\\s\\S]+?\\n([A-Za-z]+Error:[^\\n]+)', txt)
+    if m2:
+        out.update(kind="PythonError", file=m2.group(1).replace("/app/",""), line=int(m2.group(2)), summary=m2.group(3).strip())
+print(json.dumps(out))
+PY
+
+      - name: Open Incident Issue (if any)
+        if: ${{ steps.detect.outputs.kind != '' }}
+        uses: peter-evans/create-issue-from-file@v5
+        with:
+          title: "Auto-incident: ${{ steps.detect.outputs.kind }} in ${{ steps.detect.outputs.file }}:${{ steps.detect.outputs.line }}"
+          content-file: logs.txt
+          labels: |
+            auto/incident
+            python
+
+      - name: Attempt autofix PR (IndentationError only)
+        if: ${{ steps.detect.outputs.kind == 'IndentationError' }}
+        run: |
+          python scripts/autofix/indent_fix.py "${{ steps.detect.outputs.file }}" "${{ steps.detect.outputs.line }}"
+          git config user.name "ops-bot"
+          git config user.email "ops-bot@users.noreply.github.com"
+          git checkout -b "autofix/indent-${{ steps.detect.outputs.file }}-${{ steps.detect.outputs.line }}"
+          git add -A
+          git commit -m "autofix: normalize indentation on ${{ steps.detect.outputs.file }}:${{ steps.detect.outputs.line }}"
+          git push -u origin HEAD
+
+      - name: Open PR for autofix
+        if: ${{ steps.detect.outputs.kind == 'IndentationError' }}
+        uses: peter-evans/create-pull-request@v6
+        with:
+          title: "Autofix: Indentation in ${{ steps.detect.outputs.file }}:${{ steps.detect.outputs.line }}"
+          body: "Ajuste automático de indentação conforme erro detectado nos logs do Railway."
+          labels: autofix/indentation
+          branch: "autofix/indent-${{ steps.detect.outputs.file }}-${{ steps.detect.outputs.line }}"
+
+      - name: WhatsApp ping (summary)
+        if: ${{ env.META_ACCESS_TOKEN != '' && env.WHATSAPP_PHONE_NUMBER_ID != '' && env.OPS_ALERT_PHONE != '' }}
+        run: |
+          MSG="Ops Watcher: kind=${{ steps.detect.outputs.kind || 'none' }} file=${{ steps.detect.outputs.file || 'n/a' }} line=${{ steps.detect.outputs.line || 0 }}"
+          curl -s -X POST "https://graph.facebook.com/v21.0/${WHATSAPP_PHONE_NUMBER_ID}/messages" \
+            -H "Authorization: Bearer ${META_ACCESS_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{\"messaging_product\":\"whatsapp\",\"to\":\"${OPS_ALERT_PHONE}\",\"type\":\"text\",\"text\":{\"preview_url\":false,\"body\":\"${MSG}\"}}" \
+            >/dev/null 2>&1 || true
