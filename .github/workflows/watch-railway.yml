@@ -33,20 +33,13 @@ jobs:
           sudo apt-get update -y
           sudo apt-get install -y jq curl
 
-      - name: Fetch logs deep (robust)
+      - name: Fetch logs deep (Railway CLI 4.8.0)
         run: |
           set -e
           export RAILWAY_TOKEN="${RAILWAY_TOKEN}"
-          # 1) Define contexto (algumas versões exigem isso)
-          railway use --project "${RW_PROJECT_ID}" --environment "${RW_ENV_ID}" || true
-          # 2) Tenta várias assinaturas compatíveis com versões do CLI
-          (
-            railway logs --service "${RW_SERVICE_ID}" --lines 2000 --timestamps \
-            || railway logs --service "${RW_SERVICE_ID}" -n 2000 --timestamps \
-            || railway logs --lines 2000 --timestamps \
-            || railway logs -n 2000 --timestamps \
-            || railway logs
-          ) > logs.txt 2>&1 || true
+          # Railway 4.8.0: não tem 'use' e nem '--lines/-n' em 'logs'
+          # Coleta com service+environment e joga STDOUT+STDERR no arquivo
+          railway logs --service "${RW_SERVICE_ID}" --environment "${RW_ENV_ID}" > logs.txt 2>&1 || true
           echo "---- tail (200) ----"
           tail -n 200 logs.txt || true
           echo "---- size(bytes) ----"
@@ -114,7 +107,7 @@ jobs:
 
           if file.startswith("/app/"):
               file = file[len("/app/"):]
-          out={"kind":kind, "file":file, "line":line, "summary":summary}
+          out={"kind":kind,"file":file,"line":line,"summary":summary}
           open("detect.json","w").write(json.dumps(out))
           PY
           echo "kind=$(jq -r .kind detect.json)" >> "$GITHUB_OUTPUT"
