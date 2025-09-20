@@ -1,89 +1,122 @@
 name: ci-autofix-indent
 
 on:
-  workflow_run:
-    workflows: ["ci"]
-    types: [completed]
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+  workflow_dispatch:
 
 jobs:
-  autofix:
-    if: ${{ github.event.workflow_run.conclusion == 'failure' }}
+  py-indent-autofix:
     runs-on: ubuntu-latest
     permissions:
       contents: write
       pull-requests: write
-
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-python@v5
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.x"
+
+      - name: Compile all .py and capture errors
+        id: compile
+        run: |
+          python - <<'PY' || true
+          import sys, subprocess, json, pathlib
+          files = [p for p in pathlib.Path(".").rglob("*.py") if ".venv" not in str(p)]
+          errs = []
+          for p in files:
+              try:
+                  subprocess.check_output([sys.executable, "-m", "py_compile", str(p)], stderr=subprocess.STDOUT)
+              except subprocess.CalledProcessError as e:
+                  out = (e.output or b"").decode("utf-8", "ignore")
+                  errs.append({"file": str(p), "log": out})
+          pathlib.Path("py_errors.json").write_text(json.dumps(errs), encoding="utf-8")
+          print(f"found_errors={len(errs)}")
+          PY
+          echo "count=$(jq 'length' py_errors.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Parse IndentationError locations
+        id: parse
+        run: |
+          python - <<'PY'
+          import json,re,sys
+          data = json.loads(open("py_errors.json","r").read())
+          targets=[]
+          for e in data:
+              log=e["log"]
+              if "IndentationError" in log:
+                  # achar 'File "X", line N'
+                  m = re.search(r'File "([^"]+)", line (\d+)', log)
+                  if m:
+                      targets.append({"file":m.group(1), "line":int(m.group(2))})
+          import pathlib
+          pathlib.Path("indent_targets.json").write_text(json.dumps(targets), encoding="utf-8")
+          print("targets", targets)
+          PY
+          echo "count=$(jq 'length' indent_targets.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Stop if no indentation targets
+        if: ${{ steps.parse.outputs.count == '0' }}
+        run: echo "No indentation errors to fix."
 
       - name: Ensure indent_fix.py
+        if: ${{ steps.parse.outputs.count != '0' }}
         run: |
           mkdir -p scripts/autofix
           cat > scripts/autofix/indent_fix.py <<'PY'
           #!/usr/bin/env python3
           import sys, pathlib
           if len(sys.argv) < 3:
-              sys.exit(2)
+              print("usage: indent_fix.py <file> <line>", file=sys.stderr); sys.exit(2)
           p = pathlib.Path(sys.argv[1]); line_no = int(sys.argv[2])
-          txt = p.read_text(encoding="utf-8", errors="ignore").splitlines()
-          idx = max(0, min(len(txt)-1, line_no-1))
-          def indent(s): return len(s) - len(s.lstrip(" "))
-          ref = idx-1
-          while ref >= 0 and (txt[ref].strip()=="" or txt[ref].lstrip().startswith("#")):
-              ref -= 1
-          if ref >= 0:
-              ref_indent = indent(txt[ref])
-              cur = txt[idx].lstrip(" ")
-              txt[idx] = (" " * ref_indent) + cur
-              p.write_text("\n".join(txt) + ("\n" if not txt[-1].endswith("\n") else ""), encoding="utf-8")
+          lines = p.read_text(encoding="utf-8", errors="ignore").splitlines()
+          def ind(s): return len(s) - len(s.lstrip(" "))
+          def is_code(line): 
+              t=line.strip(); return t!="" and not t.startswith("#")
+          idx = max(0, min(len(lines)-1, line_no-1))
+          block_idx = idx-1
+          while block_idx >= 0:
+              s = lines[block_idx].rstrip()
+              if is_code(s) and s.endswith(":"):
+                  break
+              block_idx -= 1
+          target_indent = ind(lines[block_idx]) + 4 if block_idx >= 0 else 0
+          lines[idx] = (" " * target_indent) + lines[idx].lstrip(" ")
+          p.write_text("\n".join(lines) + ("\n" if not lines[-1].endswith("\n") else ""), encoding="utf-8")
+          print(f"fixed {p}:{line_no} -> indent {target_indent}")
           PY
           chmod +x scripts/autofix/indent_fix.py
 
-      - name: Detect IndentationError via py_compile
-        run: |
-          python - << 'PY'
-          import sys, subprocess, json, re
-          from pathlib import Path
-          files = subprocess.check_output(["git","ls-files","*.py"]).decode().splitlines()
-          p = subprocess.run([sys.executable,"-m","py_compile",*files], capture_output=True, text=True)
-          log = p.stderr or p.stdout or ""
-          Path("pyc.log").write_text(log, encoding="utf-8")
-          findings=[]
-          pat = re.compile(r'File "([^"]+)", line (\d+)[\s\S]*?IndentationError:', re.M)
-          for m in pat.finditer(log):
-              f = m.group(1)
-              if f.startswith("./"): f = f[2:]
-              findings.append({"file": f, "line": int(m.group(2))})
-          Path("findings.json").write_text(json.dumps(findings), encoding="utf-8")
-          print(f"found={len(findings)}")
-          PY
-
-      - name: Apply fixes
-        run: |
-          if [ ! -f findings.json ]; then
-            echo "No findings file"; exit 0
-          fi
-          count=$(jq 'length' findings.json 2>/dev/null || echo 0)
-          i=0
-          while [ $i -lt $count ]; do
-            file=$(jq -r ".[$i].file" findings.json)
-            line=$(jq -r ".[$i].line" findings.json)
-            echo "Fixing $file:$line"
-            python scripts/autofix/indent_fix.py "$file" "$line" || true
-            i=$((i+1))
-          done
-
-      - name: Create PR with fixes
+      - name: Apply fixes and open PR
+        if: ${{ steps.parse.outputs.count != '0' }}
         uses: peter-evans/create-pull-request@v6
         with:
           base: main
           branch: "autofix/indent-ci-${{ github.run_id }}"
           title: "Autofix (CI): normalize indentation"
-          body: "Correção automática de indentação baseada no py_compile do CI."
+          body: "Correção automática de indentação detectada no CI (py_compile)."
           labels: autofix/indentation
+          commit-message: "autofix(ci): normalize indentation"
+          add-paths: |
+            **/*.py
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run indent fixer on branch (pre-PR)
+        if: ${{ steps.parse.outputs.count != '0' }}
+        run: |
+          BR="autofix/indent-ci-${{ github.run_id }}"
+          git fetch origin "$BR" && git checkout "$BR"
+          jq -c '.[]' indent_targets.json | while read -r item; do
+            f=$(echo "$item" | jq -r '.file'); ln=$(echo "$item" | jq -r '.line')
+            echo "Fixing $f:$ln"
+            python scripts/autofix/indent_fix.py "$f" "$ln" || true
+          done
+          git add -A
+          git commit -m "autofix(ci): apply indentation fixes" || true
+          git push origin "$BR" || true
