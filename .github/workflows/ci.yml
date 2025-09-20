@@ -1,8 +1,9 @@
 name: ci
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: ["main", "master"]
   pull_request:
+
 jobs:
   python-ci:
     runs-on: ubuntu-latest
@@ -14,7 +15,7 @@ jobs:
       - name: Syntax gate (compileall)
         run: |
           python - << 'PY'
-import compileall, sys
-ok = compileall.compile_dir(".", maxlevels=10, quiet=1)
-sys.exit(0 if ok else 1)
-PY
+          import compileall, sys
+          ok = compileall.compile_dir(".", maxlevels=10, quiet=1)
+          sys.exit(0 if ok else 1)
+          PY
