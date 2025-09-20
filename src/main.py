@@ -886,35 +886,27 @@ def send_test_uetg_message(patient_id):
 
 @app.route("/api/uetg/send-immediate-test/<int:patient_id>", methods=['POST'])
 def send_immediate_test_message(patient_id):
-    """Enviar teste imediato u-ETG (ignora datas)"""
+    """Enviar teste imediato u-ETG (ignora datas) - SEM BANCO"""
     try:
-        from uetg_system import uetg
-        from datetime import datetime
-        import sqlite3
-        import json
+        # Dados fixos para teste (sem acessar banco)
+        patient_name = "Dr Guilherme Bueno"
+        patient_phone = "14997799022"  # Sem 55
+        available_times = ["12:15", "16:40", "19:00"]
         
-        # Buscar dados do paciente
-        conn = sqlite3.connect(uetg.db_path)
-        cursor = conn.cursor()
-        cursor.execute('SELECT * FROM uetg_patients WHERE id = ? AND is_active = 1', (patient_id,))
-        patient = cursor.fetchone()
-        conn.close()
+        # Criar mensagem u-ETG diretamente
+        message = f"""Olá, {patient_name}, bom dia! Tudo bem? 😄
+
+Você foi "sorteado" hoje! Conforme combinamos, preciso que você faça o u-ETG (exame de urina) hoje no consultório comigo.
+
+Horários disponíveis:
+• {available_times[0]}
+• {available_times[1]}
+• {available_times[2]}
+
+Me diga qual você prefere respondendo com o horário (ex.: "{available_times[1]}") e já deixamos combinado! Um ótimo dia!"""
         
-        if not patient:
-            return jsonify({"status": "error", "message": "Paciente não encontrado"}), 404
-        
-        patient_name = patient[1]
-        patient_phone = patient[2]
-        
-        # Tentar fazer parse dos horários
-        try:
-            available_times = json.loads(patient[4])
-        except:
-            available_times = ["12:15", "16:40", "19:00"]
-        
-        # Enviar mensagem diretamente (sem criar sorteio no banco)
-        today = datetime.now().date()
-        success = uetg.send_patient_draw_message(patient_phone, patient_name, available_times, today)
+        # Enviar mensagem diretamente
+        success = send_whatsapp_message(patient_phone, message)
         
         if success:
             # Marcar globalmente que este paciente está em modo teste
@@ -922,6 +914,7 @@ def send_immediate_test_message(patient_id):
             if 'test_mode_patients' not in globals():
                 test_mode_patients = set()
             test_mode_patients.add(patient_phone)
+            test_mode_patients.add("55" + patient_phone)  # Adicionar ambos os formatos
             
             return jsonify({
                 "status": "success",
