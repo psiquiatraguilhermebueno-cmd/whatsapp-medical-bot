@@ -24,6 +24,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install tools
         run: |
@@ -53,9 +55,11 @@ jobs:
           import re, json
           with open("logs.txt","r",errors="ignore") as f:
               txt=f.read()
-          # remove códigos de cor ANSI
+          # remove códigos ANSI (cores)
           txt = re.sub(r'\x1B\[[0-?]*[ -/]*[@-~]', '', txt)
           kind=""; file=""; line="0"; summary=""
+
+          # 1) IndentationError: pega a ÚLTIMA ocorrência e associa ao "File ..., line N" imediatamente anterior
           if "IndentationError" in txt:
               ind_pos = txt.rfind("IndentationError")
               pre = txt[:ind_pos]
@@ -63,14 +67,26 @@ jobs:
               for m in re.finditer(r'File "([^"]+)", line (\d+)', pre):
                   mfile=m
               if mfile:
-                  file=mfile.group(1); line=mfile.group(2); kind="IndentationError"
+                  file=mfile.group(1)
+                  line=mfile.group(2)
+                  kind="IndentationError"
                   summary="IndentationError"
+
+          # 2) Outros PythonError com arquivo/linha
           if not kind:
               m2 = re.search(r'File "([^"]+)", line (\d+)[\s\S]+?\n([A-Za-z_]+Error:[^\n]+)', txt)
               if m2:
-                  file=m2.group(1); line=m2.group(2); kind="PythonError"; summary=m2.group(3)
+                  file=m2.group(1)
+                  line=m2.group(2)
+                  kind="PythonError"
+                  summary=m2.group(3)
+
+          # 3) Sem stack mas container parando
           if not kind and ("stopping container" in txt.lower() or "exited with code" in txt.lower()):
-              kind="Crash"; summary="Container stopped/crashed"
+              kind="Crash"
+              summary="Container stopped/crashed"
+
+          # normaliza caminho
           if file.startswith("/app/"):
               file=file[len("/app/"):]
           out={"kind":kind,"file":file,"line":line,"summary":summary}
@@ -85,7 +101,7 @@ jobs:
         if: ${{ steps.detect.outputs.kind != '' }}
         uses: peter-evans/create-issue-from-file@v5
         with:
-          title: Auto-incident: ${{ steps.detect.outputs.kind }} in ${{ steps.detect.outputs.file }}:${{ steps.detect.outputs.line }}
+          title: "Auto-incident: ${{ steps.detect.outputs.kind }} in ${{ steps.detect.outputs.file }}:${{ steps.detect.outputs.line }}"
           content-file: logs.txt
           labels: |
             auto/incident
@@ -95,35 +111,81 @@ jobs:
         if: ${{ steps.detect.outputs.kind == '' && steps.health.outputs.code != '200' }}
         uses: peter-evans/create-issue-from-file@v5
         with:
-          title: Auto-incident: Health (code=${{ steps.health.outputs.code }})
+          title: "Auto-incident: Health (code=${{ steps.health.outputs.code }})"
           content-file: logs.txt
           labels: |
             auto/incident
             runtime
 
-      - name: Try autofix indentation
+      - name: Ensure indent_fix.py (only for IndentationError)
         if: ${{ steps.detect.outputs.kind == 'IndentationError' }}
         run: |
-          if [ -f scripts/autofix/indent_fix.py ]; then
-            python scripts/autofix/indent_fix.py "${{ steps.detect.outputs.file }}" "${{ steps.detect.outputs.line }}" || true
-            git config user.name "ops-bot"
-            git config user.email "ops-bot@users.noreply.github.com"
-            git checkout -b "autofix/indent-${{ steps.detect.outputs.file }}-${{ steps.detect.outputs.line }}" || git checkout "autofix/indent-${{ steps.detect.outputs.file }}-${{ steps.detect.outputs.line }}"
-            git add -A
-            git commit -m "autofix: normalize indentation on ${{ steps.detect.outputs.file }}:${{ steps.detect.outputs.line }}" || echo "No changes to commit"
-            git push -u origin HEAD || true
-          else
-            echo "indent_fix.py not found"
-          fi
+          mkdir -p scripts/autofix
+          cat > scripts/autofix/indent_fix.py <<'PY'
+          #!/usr/bin/env python3
+          # Corrige a indentação de UMA linha problemática alinhando-a ao bloco correto.
+          import sys, pathlib
+          if len(sys.argv) < 3:
+              sys.exit(2)
+          p = pathlib.Path(sys.argv[1])
+          line_no = int(sys.argv[2])  # 1-based
+          lines = p.read_text(encoding="utf-8", errors="ignore").splitlines()
+          idx = max(0, min(len(lines)-1, line_no-1))
+          def ind(s: str) -> int:
+              return len(s) - len(s.lstrip(" "))
+          def is_code(line: str) -> bool:
+              t = line.strip()
+              return t != "" and not t.startswith("#")
+          # Busca o início do bloco acima (linha que termina com ":")
+          block_idx = idx - 1
+          while block_idx >= 0:
+              s = lines[block_idx].rstrip()
+              if is_code(s) and s.endswith(":"):
+                  break
+              block_idx -= 1
+          target_indent = 0
+          if block_idx >= 0:
+              target_indent = ind(lines[block_idx]) + 4  # um nível dentro do bloco
+          else:
+              prev = idx - 1
+              while prev >= 0 and not is_code(lines[prev]):
+                  prev -= 1
+              if prev >= 0:
+                  target_indent = ind(lines[prev])
+          cur_stripped = lines[idx].lstrip(" ")
+          lines[idx] = (" " * target_indent) + cur_stripped
+          p.write_text("\n".join(lines) + ("\n" if not lines[-1].endswith("\n") else ""), encoding="utf-8")
+          print(f"fixed {p}:{line_no} -> indent {target_indent}")
+          PY
+          chmod +x scripts/autofix/indent_fix.py
+
+      - name: Try autofix indentation
+        id: autofix
+        if: ${{ steps.detect.outputs.kind == 'IndentationError' }}
+        env:
+          DETECT_FILE: ${{ steps.detect.outputs.file }}
+          DETECT_LINE: ${{ steps.detect.outputs.line }}
+        run: |
+          set -e
+          SANITIZED_FILE="$(echo "$DETECT_FILE" | tr '/ ' '--')"
+          BRANCH="autofix/indent-${SANITIZED_FILE}-${DETECT_LINE}"
+          echo "branch_name=$BRANCH" >> "$GITHUB_OUTPUT"
+          python scripts/autofix/indent_fix.py "$DETECT_FILE" "$DETECT_LINE" || true
+          git config user.name "ops-bot"
+          git config user.email "ops-bot@users.noreply.github.com"
+          git checkout -b "$BRANCH" || git checkout "$BRANCH"
+          git add -A
+          git commit -m "autofix: normalize indentation on ${DETECT_FILE}:${DETECT_LINE}" || echo "No changes to commit"
+          git push -u origin HEAD || true
 
       - name: Open PR
         if: ${{ steps.detect.outputs.kind == 'IndentationError' }}
         uses: peter-evans/create-pull-request@v6
         with:
-          base: main
-          branch: autofix/indent-${{ steps.detect.outputs.file }}-${{ steps.detect.outputs.line }}
-          title: Autofix: Indentation in ${{ steps.detect.outputs.file }}:${{ steps.detect.outputs.line }}
-          body: Correção automática de indentação detectada no runtime (Railway).
+          base: "main"
+          branch: "${{ steps.autofix.outputs.branch_name }}"
+          title: "Autofix: Indentation in ${{ steps.detect.outputs.file }}:${{ steps.detect.outputs.line }}"
+          body: "Correção automática de indentação detectada no runtime (Railway)."
           labels: autofix/indentation
 
       - name: WhatsApp ping
