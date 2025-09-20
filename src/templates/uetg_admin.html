@@ -341,9 +341,17 @@
                 • Quando o paciente escolhe o horário, você recebe confirmação automática
             </div>
             
+            <div class="form-group">
+                <label for="patientSelect">Selecionar Paciente:</label>
+                <select id="patientSelect" required>
+                    <option value="">Carregando pacientes...</option>
+                </select>
+            </div>
+            
             <div class="actions">
-                <button class="btn btn-primary" onclick="generateDraw()">🎲 Gerar Sorteio para Filipe</button>
+                <button class="btn btn-primary" onclick="generateDraw()">🎲 Gerar Sorteio</button>
                 <button class="btn btn-secondary" onclick="loadSchedule()">🔄 Atualizar Agenda</button>
+                <button class="btn btn-primary" onclick="sendTestMessage()">📱 Enviar Mensagem Teste</button>
             </div>
         </div>
 
@@ -440,11 +448,39 @@
             }
         });
 
+        // Carregar lista de pacientes
+        async function loadPatients() {
+            try {
+                const response = await fetch('/api/uetg/patients');
+                const patients = await response.json();
+                
+                const select = document.getElementById('patientSelect');
+                select.innerHTML = '<option value="">Selecione um paciente</option>';
+                
+                patients.forEach(patient => {
+                    const option = document.createElement('option');
+                    option.value = patient.id;
+                    option.textContent = `${patient.name} (${patient.phone_number})`;
+                    select.appendChild(option);
+                });
+                
+            } catch (error) {
+                console.error('Erro ao carregar pacientes:', error);
+                document.getElementById('patientSelect').innerHTML = '<option value="">Erro ao carregar</option>';
+            }
+        }
+
         // Gerar sorteio
         async function generateDraw() {
+            const patientId = document.getElementById('patientSelect').value;
+            
+            if (!patientId) {
+                showAlert('Selecione um paciente primeiro.', 'error');
+                return;
+            }
+            
             try {
-                // Assumindo que Filipe tem ID 1 (pode ser melhorado)
-                const response = await fetch('/api/uetg/generate-draw/1', {
+                const response = await fetch(`/api/uetg/generate-draw/${patientId}`, {
                     method: 'POST'
                 });
                 
@@ -454,7 +490,7 @@
                     const firstDate = new Date(result.draw_info.first_date).toLocaleDateString('pt-BR');
                     const secondDate = new Date(result.draw_info.second_date).toLocaleDateString('pt-BR');
                     
-                    showAlert(`Sorteio gerado! Datas: ${firstDate} e ${secondDate}. Você receberá notificação no WhatsApp.`, 'success');
+                    showAlert(`Sorteio gerado para ${result.draw_info.patient_name}! Datas: ${firstDate} e ${secondDate}. Você receberá notificação no WhatsApp.`, 'success');
                     
                     // Atualizar agenda
                     setTimeout(loadSchedule, 1000);
@@ -465,6 +501,34 @@
             } catch (error) {
                 console.error('Erro:', error);
                 showAlert('Erro ao gerar sorteio.', 'error');
+            }
+        }
+
+        // Enviar mensagem de teste
+        async function sendTestMessage() {
+            const patientId = document.getElementById('patientSelect').value;
+            
+            if (!patientId) {
+                showAlert('Selecione um paciente primeiro.', 'error');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/uetg/send-test-message/${patientId}`, {
+                    method: 'POST'
+                });
+                
+                const result = await response.json();
+                
+                if (result.status === 'success') {
+                    showAlert(`Mensagem de teste enviada para ${result.patient_name}!`, 'success');
+                } else {
+                    showAlert('Erro ao enviar mensagem: ' + result.message, 'error');
+                }
+                
+            } catch (error) {
+                console.error('Erro:', error);
+                showAlert('Erro ao enviar mensagem.', 'error');
             }
         }
 
@@ -524,8 +588,11 @@
             }, 5000);
         }
 
-        // Carregar agenda ao inicializar
-        document.addEventListener('DOMContentLoaded', loadSchedule);
+        // Carregar agenda e pacientes ao inicializar
+        document.addEventListener('DOMContentLoaded', function() {
+            loadSchedule();
+            loadPatients();
+        });
     </script>
 </body>
 </html>
