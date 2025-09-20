@@ -15,12 +15,13 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      # Garante que o script de correção exista (se já existir, reescreve igual)
       - name: Ensure indent_fix.py
         run: |
           mkdir -p scripts/autofix
@@ -33,7 +34,6 @@ jobs:
           txt = p.read_text(encoding="utf-8", errors="ignore").splitlines()
           idx = max(0, min(len(txt)-1, line_no-1))
           def indent(s): return len(s) - len(s.lstrip(" "))
-          # tenta alinhar com a linha anterior "boa"
           ref = idx-1
           while ref >= 0 and (txt[ref].strip()=="" or txt[ref].lstrip().startswith("#")):
               ref -= 1
@@ -45,9 +45,7 @@ jobs:
           PY
           chmod +x scripts/autofix/indent_fix.py
 
-      # Reproduz o erro do CI e captura quais arquivos/linhas quebraram
       - name: Detect IndentationError via py_compile
-        id: detect
         run: |
           python - << 'PY'
           import sys, subprocess, json, re
@@ -57,8 +55,7 @@ jobs:
           log = p.stderr or p.stdout or ""
           Path("pyc.log").write_text(log, encoding="utf-8")
           findings=[]
-          # Ex.: File "src/main.py", line 1290 ... IndentationError: unexpected indent
-          pat = re.compile(r'File "([^"]+)", line (\\d+)[\\s\\S]*?IndentationError:', re.M)
+          pat = re.compile(r'File "([^"]+)", line (\d+)[\s\S]*?IndentationError:', re.M)
           for m in pat.finditer(log):
               f = m.group(1)
               if f.startswith("./"): f = f[2:]
@@ -67,18 +64,12 @@ jobs:
           print(f"found={len(findings)}")
           PY
 
-      - name: Prepare branch
-        run: |
-          git config user.name "ops-bot"
-          git config user.email "ops-bot@users.noreply.github.com"
-          git checkout -b "autofix/indent-ci" || git checkout "autofix/indent-ci"
-
       - name: Apply fixes
         run: |
-          if [ ! -s findings.json ]; then
-            echo "No findings to fix"; exit 0
+          if [ ! -f findings.json ]; then
+            echo "No findings file"; exit 0
           fi
-          count=$(jq 'length' findings.json)
+          count=$(jq 'length' findings.json 2>/dev/null || echo 0)
           i=0
           while [ $i -lt $count ]; do
             file=$(jq -r ".[$i].file" findings.json)
@@ -87,13 +78,12 @@ jobs:
             python scripts/autofix/indent_fix.py "$file" "$line" || true
             i=$((i+1))
           done
-          git add -A || true
-          git commit -m "autofix(ci): normalize indentation on files detected by py_compile" || echo "No changes"
 
-      - name: Create PR
+      - name: Create PR with fixes
         uses: peter-evans/create-pull-request@v6
         with:
+          base: main
+          branch: "autofix/indent-ci-${{ github.run_id }}"
           title: "Autofix (CI): normalize indentation"
           body: "Correção automática de indentação baseada no py_compile do CI."
           labels: autofix/indentation
-          branch: "autofix/indent-ci"
