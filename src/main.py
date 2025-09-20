@@ -425,18 +425,26 @@ def process_text_message(phone_number, text_body):
             from datetime import datetime, timedelta
             import sqlite3
             
+            # Normalizar número de telefone (remover 55 se presente)
+            normalized_phone = phone_number
+            if phone_number.startswith('55') and len(phone_number) > 11:
+                normalized_phone = phone_number[2:]  # Remove 55 do início
+            
+            print(f"📱 Original phone: {phone_number}")
+            print(f"📱 Normalized phone: {normalized_phone}")
+            
             # Buscar sorteio ativo para este paciente
             conn = sqlite3.connect(uetg.db_path)
             cursor = conn.cursor()
             
-            # Buscar sorteios recentes (últimos 7 dias)
+            # Buscar sorteios recentes (últimos 7 dias) - tentar ambos os formatos
             week_ago = datetime.now().date() - timedelta(days=7)
             cursor.execute('''
                 SELECT d.*, p.name FROM uetg_weekly_draws d
                 JOIN uetg_patients p ON d.patient_id = p.id
-                WHERE p.phone_number = ? AND d.created_at >= ?
+                WHERE (p.phone_number = ? OR p.phone_number = ?) AND d.created_at >= ?
                 ORDER BY d.created_at DESC LIMIT 1
-            ''', (phone_number, week_ago))
+            ''', (phone_number, normalized_phone, week_ago))
             
             draw = cursor.fetchone()
             conn.close()
