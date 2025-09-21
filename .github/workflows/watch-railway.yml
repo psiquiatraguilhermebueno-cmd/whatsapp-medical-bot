@@ -16,8 +16,8 @@ jobs:
       RW_PROJECT_ID: ${{ secrets.RW_PROJECT_ID }}
       RW_ENV_ID: ${{ secrets.RW_ENV_ID }}
       RW_SERVICE_ID: ${{ secrets.RW_SERVICE_ID }}
-      # >>> Use APENAS o token de conta (pessoal) aqui <<<
-      RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
+      # Use apenas o Project Token aqui
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
       META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
       WHATSAPP_PHONE_NUMBER_ID: ${{ secrets.WHATSAPP_PHONE_NUMBER_ID }}
       OPS_ALERT_PHONE: ${{ secrets.OPS_ALERT_PHONE }}
@@ -33,21 +33,16 @@ jobs:
           npm i -g @railway/cli
           sudo apt-get update -y
           sudo apt-get install -y jq curl
-
-      - name: Link project/env/service (non-interactive)
-        run: |
-          set -e
-          # IMPORTANTÍSSIMO: não exportar RAILWAY_TOKEN aqui.
-          # O CLI usará RAILWAY_API_TOKEN automaticamente.
           railway --version || true
-          # Linka contexto para este workspace de CI
-          railway link -p "${RW_PROJECT_ID}" -e "${RW_ENV_ID}" -s "${RW_SERVICE_ID}"
 
-      - name: Fetch logs deep
+      - name: Fetch logs deep (Project Token + flags explícitas)
         run: |
           set -e
-          # Agora que o contexto está linkado, 'railway logs' funciona
-          railway logs > logs.txt 2>&1 || true
+          # flags evitam 'link' e qualquer login interativo
+          railway logs \
+            --project "${RW_PROJECT_ID}" \
+            --environment "${RW_ENV_ID}" \
+            --service "${RW_SERVICE_ID}" > logs.txt 2>&1 || true
           echo "---- tail (200) ----"
           tail -n 200 logs.txt || true
           echo "---- size(bytes) ----"
