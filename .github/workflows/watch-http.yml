@@ -37,7 +37,7 @@ jobs:
         id: decide
         run: |
           python - <<'PY'
-          import json, os, re, sys
+          import json, os, re
           state = {}
           if os.path.exists("state.json"):
               state = json.load(open("state.json"))
@@ -48,26 +48,19 @@ jobs:
           line = str(state.get("line") or "0").strip()
           summary = (state.get("summary") or "").strip()
 
-          # Se o arquivo veio como "<frozen ...>" ou vazio, tentar extrair do summary:
-          # Exemplo no summary:
-          #   File "/app/src/main.py", line 1290
+          # Se arquivo veio "<frozen ...>", extrai do summary o caminho real (/app/src/...)
           if (not file or file.startswith("<frozen")):
               m = re.search(r'File\s+"(?:/app/)?(src/[^"]+)",\s+line\s+(\d+)', summary)
               if m:
                   file = m.group(1)
                   line = m.group(2)
 
-          # Normaliza line
           if not line.isdigit():
               line = "0"
 
-          # Critérios:
-          # - Se main NÃO carregou E há IndentationError (no error_type OU no summary) → sinaliza autofix quando tiver file+line;
-          # - Sempre abrimos incidente quando main não carregou com erro (mesmo sem file/line).
           has_indent = ("IndentationError" in err) or ("IndentationError" in summary)
           need_incident = (not main_loaded) and (has_indent or err or summary)
 
-          # Persistir decisão em arquivos simples para os próximos steps
           open("decision.txt","w").write(json.dumps({
               "main_loaded": main_loaded,
               "error_type": err,
@@ -134,12 +127,15 @@ jobs:
           chmod +x scripts/autofix/indent_fix.py
 
       - name: Create PR (autofix)
+        id: autofix
         if: ${{ steps.decide.outputs.autofix == 'true' }}
         run: |
           set -e
           FILE=$(head -n1 signal_autofix.txt)
           LINE=$(tail -n1 signal_autofix.txt)
-          BRANCH="autofix/indent-$(echo "$FILE" | tr '/ ' '--')-$LINE"
+          TS=$(date +%s)
+          BRANCH="autofix/indent-$(echo "$FILE" | tr '/ ' '--')-$LINE-$TS"
+          echo "branch_name=$BRANCH" >> "$GITHUB_OUTPUT"
           git config user.name "ops-bot"
           git config user.email "ops-bot@users.noreply.github.com"
           git checkout -b "$BRANCH" || git checkout "$BRANCH"
@@ -153,7 +149,7 @@ jobs:
         uses: peter-evans/create-pull-request@v6
         with:
           base: "main"
-          branch: "${{ github.ref_name }}"
+          branch: "${{ steps.autofix.outputs.branch_name }}"
           title: "Autofix: Indentation in production (via /ops/boot-state)"
           body: "Correção automática de indentação baseada no estado de boot em produção."
           labels: autofix/indentation
