@@ -23,6 +23,7 @@ from sqlalchemy import text
 # Reutiliza a instância de db do projeto
 from src.models.user import db
 
+# Blueprint do Admin (será registrado com url_prefix="/admin" no main.py)
 admin_bp = Blueprint("admin", __name__)
 
 # ---------- Config & helpers ----------
@@ -38,16 +39,14 @@ WA_PHONE_ID = os.getenv("WHATSAPP_PHONE_NUMBER_ID", "")
 UETG_TEMPLATE_NAME = os.getenv("UETG_TEMPLATE_NAME", "uetg_paciente_agenda_ptbr")
 UETG_DEFAULT_SLOT = os.getenv("UETG_DEFAULT_SLOT", "07:30")
 
-# Slots fixos de oferta ao paciente (como você pediu)
+# Slots fixos de oferta ao paciente
 UETG_SLOTS_OFFER = ["12:15", "16:40", "19:00"]
 
 
 def _is_authorized(req) -> bool:
-    # Cookie simples para sessão administrativa
     token_cookie = req.cookies.get("admin_token", "")
     if token_cookie and ADMIN_TOKEN and token_cookie == ADMIN_TOKEN:
         return True
-    # Fallback: permitir token via query em casos de emergência/primeiro acesso
     token_qs = req.args.get("token", "").strip()
     if token_qs and ADMIN_TOKEN and token_qs == ADMIN_TOKEN:
         return True
@@ -60,7 +59,6 @@ def _require_auth():
 
 
 def _week_bounds_today():
-    """Retorna (monday, sunday) da semana atual em TZ São Paulo."""
     now = datetime.now(TZ)
     today = now.date()
     monday = today - timedelta(days=today.weekday())  # 0 = Monday
@@ -69,10 +67,6 @@ def _week_bounds_today():
 
 
 def _sorted_week_draw(now=None):
-    """
-    Sorteia 2 dias: (Seg ou Ter) e (Qui ou Sex) da semana corrente.
-    Retorna dict com datas e strings formatadas.
-    """
     if now is None:
         now = datetime.now(TZ)
     base_date = now.date()
@@ -85,6 +79,7 @@ def _sorted_week_draw(now=None):
     second_pick = random.choice(second_candidates)
 
     def fmt(d):
+        # exemplo "23/09 (Ter)"
         return d.strftime("%d/%m (%a)")
 
     return {
@@ -146,42 +141,39 @@ def _fetch_runs(limit=50):
         rows = db.session.execute(sql, {"limit": limit}).mappings().all()
         return [dict(row) for row in rows]
     except Exception:
-        # Se não existe tabela, retorna vazio silencioso para não travar a UI
         return []
 
 
-# ---------- Views ----------
+# ---------- Views (rotas RELATIVAS ao prefixo "/admin") ----------
 
-@admin_bp.route("/admin/login", methods=["GET", "POST"])
+@admin_bp.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
         token = (request.form.get("token") or "").strip()
         nxt = request.args.get("next", url_for("admin.home"))
         if ADMIN_TOKEN and token == ADMIN_TOKEN:
             resp = make_response(redirect(nxt))
-            # Cookie sessão admin (simples e suficiente aqui)
             resp.set_cookie("admin_token", token, httponly=True, samesite="Lax", max_age=7*24*3600)
             return resp
         return render_template_string(LOGIN_HTML, error="Token inválido")
     return render_template_string(LOGIN_HTML, error="")
 
 
-@admin_bp.route("/admin/logout", methods=["POST", "GET"])
+@admin_bp.route("/logout", methods=["POST", "GET"])
 def logout():
     resp = make_response(redirect(url_for("admin.login")))
     resp.delete_cookie("admin_token")
     return resp
 
 
-@admin_bp.route("/admin")
+@admin_bp.route("/")
 def home():
     if not _is_authorized(request):
         return _require_auth()
-    # “ping” simples: se chegamos aqui, sistema online
     return render_template_string(HOME_HTML, tz=TZ_NAME)
 
 
-@admin_bp.route("/admin/uetg")
+@admin_bp.route("/uetg")
 def uetg_page():
     if not _is_authorized(request):
         return _require_auth()
@@ -203,7 +195,7 @@ def uetg_page():
     )
 
 
-@admin_bp.route("/admin/api/uetg/test-draw", methods=["POST"])
+@admin_bp.route("/api/uetg/test-draw", methods=["POST"])
 def uetg_test_draw():
     """
     Sorteio “FAKE” só para o admin: NÃO toca em paciente, NÃO grava banco.
