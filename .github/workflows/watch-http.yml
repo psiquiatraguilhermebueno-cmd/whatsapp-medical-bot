@@ -92,7 +92,7 @@ jobs:
         uses: peter-evans/create-issue-from-file@v5
         with:
           title: "Auto-incident: Boot failure in production (see /ops/boot-state)"
-          content-file: state.json
+          content-filepath: state.json
           labels: |
             auto/incident
             runtime
@@ -126,7 +126,7 @@ jobs:
           PY
           chmod +x scripts/autofix/indent_fix.py
 
-      - name: Create PR (autofix)
+      - name: Create branch & try indent autofix
         id: autofix
         if: ${{ steps.decide.outputs.autofix == 'true' }}
         run: |
@@ -143,18 +143,44 @@ jobs:
           # não versionar artefatos temporários do workflow
           rm -f decision.txt signal_autofix.txt signal_incident.txt state.json || true
           git add -A
-          git commit -m "autofix: normalize indentation on ${FILE}:${LINE}" || echo "no changes"
+          if git diff --cached --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "no staged changes after indent fix"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            git commit -m "autofix: normalize indentation on ${FILE}:${LINE}"
+            git push -u origin HEAD || true
+          fi
+
+      - name: ESCALATE — replace src/main.py with clean baseline
+        id: escalate
+        if: ${{ steps.autofix.outputs.changed == 'false' }}
+        run: |
+          set -e
+          TS=$(date +%s)
+          BRANCH="autofix/replace-main-with-clean-$TS"
+          echo "branch_name=$BRANCH" >> "$GITHUB_OUTPUT"
+          git config user.name "ops-bot"
+          git config user.email "ops-bot@users.noreply.github.com"
+          git checkout -b "$BRANCH" || git checkout "$BRANCH"
+          # usa o script existente no repo para escrever um main.py limpo e funcional
+          if [ -f fix_main_clean.py ]; then
+            python fix_main_clean.py
+          else
+            echo "FATAL: fix_main_clean.py não encontrado"; exit 1
+          fi
+          git add -A
+          git commit -m "autofix: replace src/main.py with clean baseline (fix_main_clean)"
           git push -u origin HEAD || true
 
-      - name: Open PR object (no reset)
-        if: ${{ steps.decide.outputs.autofix == 'true' }}
+      - name: Open PR for indent autofix (if changed)
+        if: ${{ steps.autofix.outputs.changed == 'true' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HEAD_BRANCH: ${{ steps.autofix.outputs.branch_name }}
         run: |
           set -e
           echo "Opening PR from ${HEAD_BRANCH} to main"
-          # tenta criar; se já existir PR idêntico, não falha
           curl -s -X POST \
             -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" \
@@ -165,6 +191,28 @@ jobs:
             "head": "${HEAD_BRANCH}",
             "base": "main",
             "body": "Correção automática de indentação baseada no estado de boot em produção.",
+            "maintainer_can_modify": true
+          }
+          EOF
+
+      - name: Open PR for clean replace (if escalated)
+        if: ${{ steps.autofix.outputs.changed == 'false' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_BRANCH: ${{ steps.escalate.outputs.branch_name }}
+        run: |
+          set -e
+          echo "Opening PR from ${HEAD_BRANCH} to main (clean baseline)"
+          curl -s -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/${{ github.repository }}/pulls \
+            -d @- <<EOF || true
+          {
+            "title": "Autofix: Replace src/main.py with clean baseline (fix_main_clean)",
+            "head": "${HEAD_BRANCH}",
+            "base": "main",
+            "body": "Substitui src/main.py pela versão limpa e funcional já validada em produção (fallback fix_main_clean).",
             "maintainer_can_modify": true
           }
           EOF
