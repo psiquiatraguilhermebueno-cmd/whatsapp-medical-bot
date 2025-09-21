@@ -16,8 +16,8 @@ jobs:
       RW_PROJECT_ID: ${{ secrets.RW_PROJECT_ID }}
       RW_ENV_ID: ${{ secrets.RW_ENV_ID }}
       RW_SERVICE_ID: ${{ secrets.RW_SERVICE_ID }}
-      # usa Project Token do Railway via Secrets
-      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      # >>> Use APENAS o token de conta (pessoal) aqui <<<
+      RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
       META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
       WHATSAPP_PHONE_NUMBER_ID: ${{ secrets.WHATSAPP_PHONE_NUMBER_ID }}
       OPS_ALERT_PHONE: ${{ secrets.OPS_ALERT_PHONE }}
@@ -34,17 +34,24 @@ jobs:
           sudo apt-get update -y
           sudo apt-get install -y jq curl
 
-      - name: Fetch logs deep (Railway CLI 4.8.0)
+      - name: Link project/env/service (non-interactive)
         run: |
           set -e
-          # Sem login: CLI usa RAILWAY_TOKEN do ambiente
-          railway logs --service "${RW_SERVICE_ID}" --environment "${RW_ENV_ID}" > logs.txt 2>&1 || true
+          # IMPORTANTÍSSIMO: não exportar RAILWAY_TOKEN aqui.
+          # O CLI usará RAILWAY_API_TOKEN automaticamente.
+          railway --version || true
+          # Linka contexto para este workspace de CI
+          railway link -p "${RW_PROJECT_ID}" -e "${RW_ENV_ID}" -s "${RW_SERVICE_ID}"
+
+      - name: Fetch logs deep
+        run: |
+          set -e
+          # Agora que o contexto está linkado, 'railway logs' funciona
+          railway logs > logs.txt 2>&1 || true
           echo "---- tail (200) ----"
           tail -n 200 logs.txt || true
           echo "---- size(bytes) ----"
           wc -c logs.txt || true
-          echo "---- cli version ----"
-          railway --version || true
 
       - name: Health probe
         id: health
@@ -59,17 +66,15 @@ jobs:
           import re, json
           with open("logs.txt","r",errors="ignore") as f:
               raw=f.read()
-          txt = re.sub(r'\x1B\[[0-?]*[ -/]*[@-~]', '', raw)  # limpa ANSI
+          txt = re.sub(r'\x1B\[[0-?]*[ -/]*[@-~]', '', raw)
 
           kind=""; file=""; line="0"; summary=""
 
-          # (A) Stack padrão: File "/app/src/main.py", line N + IndentationError
           mA = re.search(r'File "(/app/src/main\.py)", line (\d+)', txt)
           if mA and "IndentationError" in txt:
               file, line = mA.group(1), mA.group(2)
               kind, summary = "IndentationError", "IndentationError (stack match)"
 
-          # (B) BOOT: Failed to load main.app: IndentationError: ... (main.py, line N)
           if not kind:
               mB = re.search(r'Failed to load main\.app:\s*IndentationError:[^\(]*\(([^,]+), line (\d+)\)', txt)
               if mB:
@@ -78,7 +83,6 @@ jobs:
                   file = "src/main.py" if fname.endswith("main.py") else (f"src/{fname}" if not fname.startswith("src/") else fname)
                   kind, summary = "IndentationError", "IndentationError (boot match)"
 
-          # (C) Fallback: última "IndentationError" + último "File ..., line N" antes
           if not kind and "IndentationError" in txt:
               ind_pos = txt.rfind("IndentationError")
               pre = txt[:ind_pos]
@@ -89,14 +93,12 @@ jobs:
                   file, line = mfile.group(1), mfile.group(2)
                   kind, summary = "IndentationError", "IndentationError (generic match)"
 
-          # PythonError genérico
           if not kind:
               m2 = re.search(r'File "([^"]+)", line (\d+)[\s\S]+?\n([A-Za-z_]+Error:[^\n]+)', txt)
               if m2:
                   file, line = m2.group(1), m2.group(2)
                   kind, summary = "PythonError", m2.group(3)
 
-          # Crash sem stack
           if not kind and ("stopping container" in txt.lower() or "exited with code" in txt.lower()):
               kind, summary = "Crash", "Container stopped/crashed"
 
