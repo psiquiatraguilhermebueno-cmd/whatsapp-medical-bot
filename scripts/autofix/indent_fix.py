@@ -1,16 +1,21 @@
 #!/usr/bin/env python3
 import sys, pathlib
 if len(sys.argv) < 3:
-    sys.exit(2)
-p = pathlib.Path(sys.argv[1]); line_no = int(sys.argv[2])
-txt = p.read_text(encoding="utf-8", errors="ignore").splitlines()
-idx = max(0, min(len(txt)-1, line_no-1))
-def indent(s): return len(s) - len(s.lstrip(" "))
-ref = idx-1
-while ref >= 0 and (txt[ref].strip()=="" or txt[ref].lstrip().startswith("#")):
-    ref -= 1
-if ref >= 0:
-    ref_indent = indent(txt[ref])
-    cur = txt[idx].lstrip(" ")
-    txt[idx] = (" " * ref_indent) + cur
-    p.write_text("\n".join(txt) + ("\n" if not txt[-1].endswith("\n") else ""), encoding="utf-8")
+    print("usage: indent_fix.py <file> <line>", file=sys.stderr); sys.exit(2)
+p = pathlib.Path(sys.argv[1])
+line_no = int(sys.argv[2])
+lines = p.read_text(encoding="utf-8", errors="ignore").splitlines()
+if not (1 <= line_no <= len(lines)): sys.exit(0)
+def ind(s): return len(s) - len(s.lstrip(" "))
+# alinha a linha alvo ao bloco pai (múltiplos de 4)
+idx = line_no - 1
+parent = idx - 1
+while parent >= 0:
+    s = lines[parent].rstrip()
+    if s.strip() and s.strip().endswith(":"):
+        break
+    parent -= 1
+target = ind(lines[parent]) + 4 if parent >= 0 else 0
+lines[idx] = (" " * target) + lines[idx].lstrip(" ")
+p.write_text("\n".join(lines) + ("\n" if not lines[-1].endswith("\n") else ""), encoding="utf-8")
+print(f"fixed {p} at line {line_no} -> indent {target}")
