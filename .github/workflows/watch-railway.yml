@@ -13,11 +13,10 @@ jobs:
       issues: write
       pull-requests: write
     env:
-      RW_PROJECT_ID: ${{ secrets.RW_PROJECT_ID }}
+      RW_PROJECT_ID: ${{ secrets.RW_PROJECT_ID }}   # (mantemos por consistência)
       RW_ENV_ID: ${{ secrets.RW_ENV_ID }}
       RW_SERVICE_ID: ${{ secrets.RW_SERVICE_ID }}
-      # Use apenas o Project Token aqui
-      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}   # Project Token
       META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
       WHATSAPP_PHONE_NUMBER_ID: ${{ secrets.WHATSAPP_PHONE_NUMBER_ID }}
       OPS_ALERT_PHONE: ${{ secrets.OPS_ALERT_PHONE }}
@@ -35,12 +34,13 @@ jobs:
           sudo apt-get install -y jq curl
           railway --version || true
 
-      - name: Fetch logs deep (Project Token + flags explícitas)
+      # >>> CORRIGIDO: sem --project (CLI 4.8.0 não aceita)
+      - name: Fetch logs deep (CLI 4.8.0)
         run: |
           set -e
-          # flags evitam 'link' e qualquer login interativo
+          # O CLI usa o RAILWAY_TOKEN do ambiente (Project Token).
+          # Basta indicar environment e service.
           railway logs \
-            --project "${RW_PROJECT_ID}" \
             --environment "${RW_ENV_ID}" \
             --service "${RW_SERVICE_ID}" > logs.txt 2>&1 || true
           echo "---- tail (200) ----"
