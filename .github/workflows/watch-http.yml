@@ -1,0 +1,134 @@
+name: watch-http
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+jobs:
+  probe-and-autofix:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    env:
+      POST_DEPLOY_URL: ${{ secrets.POST_DEPLOY_URL }}
+      META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+      WHATSAPP_PHONE_NUMBER_ID: ${{ secrets.WHATSAPP_PHONE_NUMBER_ID }}
+      OPS_ALERT_PHONE: ${{ secrets.OPS_ALERT_PHONE }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Probe boot-state
+        id: probe
+        run: |
+          set -e
+          URL="${POST_DEPLOY_URL}/ops/boot-state"
+          echo "GET $URL"
+          CODE=$(curl -s -o state.json -w "%{http_code}" "$URL" || echo "000")
+          echo "http=$CODE" >> "$GITHUB_OUTPUT"
+          cat state.json || true
+
+      - name: Decide action
+        id: decide
+        run: |
+          python - <<'PY'
+          import json, os
+          st = {}
+          if os.path.exists("state.json"):
+              st = json.load(open("state.json"))
+          main_loaded = st.get("main_loaded", False)
+          err = (st.get("error_type") or "").strip()
+          file = (st.get("file") or "").strip()
+          line = str(st.get("line") or "0")
+          print("STATE:", st)
+          # Sinaliza erro de indentação acionável
+          if (not main_loaded) and err == "IndentationError" and file and line.isdigit():
+              open("signal.txt","w").write("\n".join([file, line]))
+          PY
+          if [ -f signal.txt ]; then
+            echo "autofix=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "autofix=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open incident (if needed)
+        if: ${{ steps.decide.outputs.autofix == 'true' }}
+        uses: peter-evans/create-issue-from-file@v5
+        with:
+          title: "Auto-incident: IndentationError detected in production"
+          content-file: state.json
+          labels: |
+            auto/incident
+            runtime
+
+      - name: Ensure indent_fix.py
+        if: ${{ steps.decide.outputs.autofix == 'true' }}
+        run: |
+          mkdir -p scripts/autofix
+          cat > scripts/autofix/indent_fix.py <<'PY'
+          #!/usr/bin/env python3
+          import sys, pathlib
+          if len(sys.argv) < 3:
+              print("usage: indent_fix.py <file> <line>", file=sys.stderr); sys.exit(2)
+          p = pathlib.Path(sys.argv[1])
+          line_no = int(sys.argv[2])
+          lines = p.read_text(encoding="utf-8", errors="ignore").splitlines()
+          if not (1 <= line_no <= len(lines)): sys.exit(0)
+          def ind(s): return len(s) - len(s.lstrip(" "))
+          # fixa a indentação do bloco "pai" (a linha alvo vira múltiplo de 4)
+          idx = line_no - 1
+          # acha o "pai" com dois-pontos acima
+          parent = idx - 1
+          while parent >= 0:
+              s = lines[parent].rstrip()
+              if s.strip() and s.strip().endswith(":"):
+                  break
+              parent -= 1
+          target = ind(lines[parent]) + 4 if parent >= 0 else 0
+          lines[idx] = (" " * target) + lines[idx].lstrip(" ")
+          p.write_text("\n".join(lines) + ("\n" if not lines[-1].endswith("\n") else ""), encoding="utf-8")
+          print(f"fixed {p} at line {line_no} -> indent {target}")
+          PY
+          chmod +x scripts/autofix/indent_fix.py
+
+      - name: Create PR (autofix)
+        if: ${{ steps.decide.outputs.autofix == 'true' }}
+        run: |
+          set -e
+          FILE=$(head -n1 signal.txt)
+          LINE=$(tail -n1 signal.txt)
+          BRANCH="autofix/indent-$(echo "$FILE" | tr '/ ' '--')-$LINE"
+          git config user.name "ops-bot"
+          git config user.email "ops-bot@users.noreply.github.com"
+          git checkout -b "$BRANCH" || git checkout "$BRANCH"
+          python scripts/autofix/indent_fix.py "$FILE" "$LINE" || true
+          git add -A
+          git commit -m "autofix: normalize indentation on ${FILE}:${LINE}" || echo "no changes"
+          git push -u origin HEAD || true
+
+      - name: Open PR object
+        if: ${{ steps.decide.outputs.autofix == 'true' }}
+        uses: peter-evans/create-pull-request@v6
+        with:
+          base: "main"
+          branch: "autofix/indent-${{ steps.probe.outputs.http }}"
+          title: "Autofix: Indentation in production (see /ops/boot-state)"
+          body: "Correção automática de indentação baseada no estado de boot em produção."
+          labels: autofix/indentation
+
+      - name: WhatsApp ping
+        if: ${{ env.META_ACCESS_TOKEN != '' && env.WHATSAPP_PHONE_NUMBER_ID != '' && env.OPS_ALERT_PHONE != '' }}
+        run: |
+          HTTP="${{ steps.probe.outputs.http }}"
+          if [ -f state.json ]; then BODY=$(cat state.json); else BODY='{}'; fi
+          MSG="Ops Watcher (HTTP): code=${HTTP} state=${BODY}"
+          curl -s -X POST "https://graph.facebook.com/v21.0/${WHATSAPP_PHONE_NUMBER_ID}/messages" \
+            -H "Authorization: Bearer ${META_ACCESS_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{\"messaging_product\":\"whatsapp\",\"to\":\"${OPS_ALERT_PHONE}\",\"type\":\"text\",\"text\":{\"preview_url\":false,\"body\":\"${MSG:0:900}\"}}" \
+            >/dev/null 2>&1 || true
