@@ -140,19 +140,34 @@ jobs:
           git config user.email "ops-bot@users.noreply.github.com"
           git checkout -b "$BRANCH" || git checkout "$BRANCH"
           python scripts/autofix/indent_fix.py "$FILE" "$LINE" || true
+          # não versionar artefatos temporários do workflow
+          rm -f decision.txt signal_autofix.txt signal_incident.txt state.json || true
           git add -A
           git commit -m "autofix: normalize indentation on ${FILE}:${LINE}" || echo "no changes"
           git push -u origin HEAD || true
 
-      - name: Open PR object
+      - name: Open PR object (no reset)
         if: ${{ steps.decide.outputs.autofix == 'true' }}
-        uses: peter-evans/create-pull-request@v6
-        with:
-          base: "main"
-          branch: "${{ steps.autofix.outputs.branch_name }}"
-          title: "Autofix: Indentation in production (via /ops/boot-state)"
-          body: "Correção automática de indentação baseada no estado de boot em produção."
-          labels: autofix/indentation
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_BRANCH: ${{ steps.autofix.outputs.branch_name }}
+        run: |
+          set -e
+          echo "Opening PR from ${HEAD_BRANCH} to main"
+          # tenta criar; se já existir PR idêntico, não falha
+          curl -s -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/${{ github.repository }}/pulls \
+            -d @- <<EOF || true
+          {
+            "title": "Autofix: Indentation in production (via /ops/boot-state)",
+            "head": "${HEAD_BRANCH}",
+            "base": "main",
+            "body": "Correção automática de indentação baseada no estado de boot em produção.",
+            "maintainer_can_modify": true
+          }
+          EOF
 
       - name: WhatsApp ping
         if: ${{ env.META_ACCESS_TOKEN != '' && env.WHATSAPP_PHONE_NUMBER_ID != '' && env.OPS_ALERT_PHONE != '' }}
