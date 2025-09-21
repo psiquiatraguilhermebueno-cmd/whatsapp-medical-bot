@@ -2,6 +2,7 @@
 Webhook integrado para WhatsApp com processamento automático
 """
 
+import os
 import json
 import logging
 import requests
