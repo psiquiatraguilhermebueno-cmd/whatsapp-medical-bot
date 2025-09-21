@@ -8,3 +8,4 @@ python-dotenv>=1.0
 gunicorn>=21.2
 pytz>=2024.1
 python-dateutil>=2.9
+croniter>=2.0
