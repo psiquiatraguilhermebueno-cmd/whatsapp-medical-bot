@@ -67,20 +67,28 @@ def _week_bounds_today():
 
 
 def _sorted_week_draw(now=None):
+    """
+    Sorteia 2 datas na semana atual:
+      - 1ª: segunda OU terça
+      - 2ª: quinta OU sexta
+    Retorna labels com dias da semana em PT-BR (Seg, Ter, Qua, Qui, Sex, Sáb, Dom)
+    """
     if now is None:
         now = datetime.now(TZ)
     base_date = now.date()
     monday = base_date - timedelta(days=base_date.weekday())
 
-    first_candidates = [monday, monday + timedelta(days=1)]       # seg/ter
+    first_candidates = [monday, monday + timedelta(days=1)]                 # seg/ter
     second_candidates = [monday + timedelta(days=3), monday + timedelta(days=4)]  # qui/sex
 
     first_pick = random.choice(first_candidates)
     second_pick = random.choice(second_candidates)
 
+    # nomes PT-BR curtos (sem depender de locale do SO)
+    pt_weekdays = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
+
     def fmt(d):
-        # exemplo "23/09 (Ter)"
-        return d.strftime("%d/%m (%a)")
+        return f"{d.strftime('%d/%m')} ({pt_weekdays[d.weekday()]})"
 
     return {
         "first_date": first_pick,
