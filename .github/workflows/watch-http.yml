@@ -33,34 +33,72 @@ jobs:
           echo "http=$CODE" >> "$GITHUB_OUTPUT"
           cat state.json || true
 
-      - name: Decide action
+      - name: Decide action (robust summary parsing)
         id: decide
         run: |
           python - <<'PY'
-          import json, os
-          st = {}
+          import json, os, re, sys
+          state = {}
           if os.path.exists("state.json"):
-              st = json.load(open("state.json"))
-          main_loaded = st.get("main_loaded", False)
-          err = (st.get("error_type") or "").strip()
-          file = (st.get("file") or "").strip()
-          line = str(st.get("line") or "0")
-          print("STATE:", st)
-          # Sinaliza erro de indentação acionável
-          if (not main_loaded) and err == "IndentationError" and file and line.isdigit():
-              open("signal.txt","w").write("\n".join([file, line]))
+              state = json.load(open("state.json"))
+
+          main_loaded = bool(state.get("main_loaded"))
+          err  = (state.get("error_type") or "").strip()
+          file = (state.get("file") or "").strip()
+          line = str(state.get("line") or "0").strip()
+          summary = (state.get("summary") or "").strip()
+
+          # Se o arquivo veio como "<frozen ...>" ou vazio, tentar extrair do summary:
+          # Exemplo no summary:
+          #   File "/app/src/main.py", line 1290
+          if (not file or file.startswith("<frozen")):
+              m = re.search(r'File\s+"(?:/app/)?(src/[^"]+)",\s+line\s+(\d+)', summary)
+              if m:
+                  file = m.group(1)
+                  line = m.group(2)
+
+          # Normaliza line
+          if not line.isdigit():
+              line = "0"
+
+          # Critérios:
+          # - Se main NÃO carregou E há IndentationError (no error_type OU no summary) → sinaliza autofix quando tiver file+line;
+          # - Sempre abrimos incidente quando main não carregou com erro (mesmo sem file/line).
+          has_indent = ("IndentationError" in err) or ("IndentationError" in summary)
+          need_incident = (not main_loaded) and (has_indent or err or summary)
+
+          # Persistir decisão em arquivos simples para os próximos steps
+          open("decision.txt","w").write(json.dumps({
+              "main_loaded": main_loaded,
+              "error_type": err,
+              "file": file,
+              "line": line,
+              "summary_head": summary[:200]
+          }))
+
+          if (not main_loaded) and has_indent and file and line.isdigit() and int(line) > 0:
+              open("signal_autofix.txt","w").write(f"{file}\n{line}\n")
+
+          if need_incident:
+              open("signal_incident.txt","w").write("1\n")
           PY
-          if [ -f signal.txt ]; then
+
+          if [ -f signal_autofix.txt ]; then
             echo "autofix=true" >> "$GITHUB_OUTPUT"
           else
             echo "autofix=false" >> "$GITHUB_OUTPUT"
           fi
+          if [ -f signal_incident.txt ]; then
+            echo "incident=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "incident=false" >> "$GITHUB_OUTPUT"
+          fi
 
-      - name: Open incident (if needed)
-        if: ${{ steps.decide.outputs.autofix == 'true' }}
+      - name: Open incident (always when main failed)
+        if: ${{ steps.decide.outputs.incident == 'true' }}
         uses: peter-evans/create-issue-from-file@v5
         with:
-          title: "Auto-incident: IndentationError detected in production"
+          title: "Auto-incident: Boot failure in production (see /ops/boot-state)"
           content-file: state.json
           labels: |
             auto/incident
@@ -80,9 +118,8 @@ jobs:
           lines = p.read_text(encoding="utf-8", errors="ignore").splitlines()
           if not (1 <= line_no <= len(lines)): sys.exit(0)
           def ind(s): return len(s) - len(s.lstrip(" "))
-          # fixa a indentação do bloco "pai" (a linha alvo vira múltiplo de 4)
+          # alinha a linha alvo ao bloco pai (múltiplos de 4)
           idx = line_no - 1
-          # acha o "pai" com dois-pontos acima
           parent = idx - 1
           while parent >= 0:
               s = lines[parent].rstrip()
@@ -100,8 +137,8 @@ jobs:
         if: ${{ steps.decide.outputs.autofix == 'true' }}
         run: |
           set -e
-          FILE=$(head -n1 signal.txt)
-          LINE=$(tail -n1 signal.txt)
+          FILE=$(head -n1 signal_autofix.txt)
+          LINE=$(tail -n1 signal_autofix.txt)
           BRANCH="autofix/indent-$(echo "$FILE" | tr '/ ' '--')-$LINE"
           git config user.name "ops-bot"
           git config user.email "ops-bot@users.noreply.github.com"
@@ -116,8 +153,8 @@ jobs:
         uses: peter-evans/create-pull-request@v6
         with:
           base: "main"
-          branch: "autofix/indent-${{ steps.probe.outputs.http }}"
-          title: "Autofix: Indentation in production (see /ops/boot-state)"
+          branch: "${{ github.ref_name }}"
+          title: "Autofix: Indentation in production (via /ops/boot-state)"
           body: "Correção automática de indentação baseada no estado de boot em produção."
           labels: autofix/indentation
 
@@ -125,8 +162,8 @@ jobs:
         if: ${{ env.META_ACCESS_TOKEN != '' && env.WHATSAPP_PHONE_NUMBER_ID != '' && env.OPS_ALERT_PHONE != '' }}
         run: |
           HTTP="${{ steps.probe.outputs.http }}"
-          if [ -f state.json ]; then BODY=$(cat state.json); else BODY='{}'; fi
-          MSG="Ops Watcher (HTTP): code=${HTTP} state=${BODY}"
+          HEAD=$(cat decision.txt 2>/dev/null || echo '{}')
+          MSG="Ops Watcher (HTTP): http=${HTTP} head=${HEAD}"
           curl -s -X POST "https://graph.facebook.com/v21.0/${WHATSAPP_PHONE_NUMBER_ID}/messages" \
             -H "Authorization: Bearer ${META_ACCESS_TOKEN}" \
             -H "Content-Type: application/json" \
