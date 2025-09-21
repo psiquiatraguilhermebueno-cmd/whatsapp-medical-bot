@@ -25,7 +25,9 @@ from src.routes.scheduler import scheduler_bp
 from src.routes.iclinic import iclinic_bp
 from src.routes.admin_tasks import admin_tasks_bp
 from src.routes.admin_patient import admin_patient_bp
-from src.admin.routes import admin_bp
+# >>> alteração aqui: usar o módulo renomeado do admin (evita conflito com a pasta routes/)
+from src.admin.admin_ui import admin_bp
+# <<<
 from src.admin.services.scheduler_service import init_campaign_scheduler
 from src.jobs.uetg_scheduler import init_scheduler
 
