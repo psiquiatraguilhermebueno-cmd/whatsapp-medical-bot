@@ -1,16 +1,3 @@
-bash -lc '
-set -euo pipefail
-
-REPO_URL="https://github.com/psiquiatraguilhermebueno-cmd/whatsapp-medical-bot.git"
-WORKDIR="$HOME/whatsapp-medical-bot"
-
-rm -rf "$WORKDIR"
-git clone "$REPO_URL" "$WORKDIR"
-cd "$WORKDIR"
-git checkout main
-git pull --ff-only
-
-cat > src/models/patient.py <<'"PY"'
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
 from src.models.user import db
@@ -58,14 +45,3 @@ class Patient(db.Model):
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
             'is_active': self.is_active
         }
-"PY"
-
-git add src/models/patient.py
-git commit -m "revert: Patient model to last known good (restore admin)"
-git push origin main
-
-echo
-echo "✅ Enviado para main. Aguarde o deploy do Railway e teste:"
-echo "  • /ops/boot-state  → deve mostrar main_loaded: true"
-echo "  • /admin           → deve abrir sem 404"
-'
