@@ -31,21 +31,27 @@ from src.routes.admin_patient import admin_patient_bp
 # ---- Admin UI (import direto do módulo correto; se falhar, não derruba o app)
 admin_bp = None
 try:
-    from src.admin.routes.admin import admin_bp  # <- caminho direto
+    from src.admin.routes.admin import admin_bp  # o blueprint do Admin
 except Exception as e:
     print(f"[BOOT][WARN] admin_bp not loaded: {e}")
 
 # ---- Modelos que precisam existir antes do create_all()
-# (se algum faltar, não quebra o boot)
+# (1) tabela 'patient' (singular), usada por FKs de outros módulos
 try:
-    from src.models.patient import Patient  # tabela 'patients'
+    from src.models.patient import Patient
 except Exception as e:
     print(f"[BOOT][WARN] patient model not loaded: {e}")
 
+# (2) tabela 'patients' (plural), esperada pelo Admin
 try:
-    # modelos de campanha; em SQLite, você já ajustou JSONB/UUID/ARRAY para tipos compatíveis
+    from src.models.patients import Patients
+except Exception as e:
+    print(f"[BOOT][WARN] patients model not loaded: {e}")
+
+# (3) campanhas WhatsApp (nomes esperados pelo Admin: WACampaign*)
+try:
     from src.admin.models.campaign import (
-        WaCampaign, WaCampaignRecipient, WaCampaignRun
+        WACampaign, WACampaignRecipient, WACampaignRun
     )
 except Exception as e:
     print(f"[BOOT][WARN] campaign models not loaded: {e}")
@@ -93,7 +99,6 @@ app.register_blueprint(admin_patient_bp, url_prefix="/admin/api")
 if admin_bp:
     app.register_blueprint(admin_bp, url_prefix="/admin")
 else:
-    # fallback amigável para evitar 404 total se o Admin não carregar
     @app.route("/admin")
     @app.route("/admin/")
     def admin_unavailable():
@@ -135,7 +140,6 @@ def health():
 def static_files(filename):
     return send_from_directory(app.static_folder, filename)
 
-# ---- Importa schedulers de forma segura (não travar boot se faltar algo)
 def _safe_import_schedulers():
     init_campaign_scheduler = None
     init_uetg_scheduler = None
