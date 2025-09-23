@@ -4,17 +4,17 @@ import sys
 import logging
 from sqlalchemy import text
 
-# DON'T CHANGE THIS !!!
+# Garante que "src" esteja no path
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from flask import Flask, send_from_directory, jsonify, request
+from flask import Flask, send_from_directory, jsonify
 from flask_cors import CORS
 from datetime import datetime
 
-# Extensões / DB
+# ---- DB base
 from src.models.user import db
 
-# Blueprints (rotas)
+# ---- Blueprints principais
 from src.routes.user import user_bp
 from src.routes.patient import patient_bp
 from src.routes.reminder import reminder_bp
@@ -28,17 +28,21 @@ from src.routes.scheduler import scheduler_bp
 from src.routes.iclinic import iclinic_bp
 from src.routes.admin_tasks import admin_tasks_bp
 from src.routes.admin_patient import admin_patient_bp
-from src.admin.routes import admin_bp
+from src.admin.routes import admin_bp  # UI do Admin
 
-# Jobs / serviços
-from src.admin.services.scheduler_service import init_campaign_scheduler
-from src.jobs.uetg_scheduler import init_scheduler
+# ---- Modelos que precisam existir antes do create_all()
+# (se algum faltar, não quebra o boot)
+try:
+    from src.models.patient import Patient  # tabela 'patients'
+except Exception as e:
+    print(f"[BOOT][WARN] patient model not loaded: {e}")
 
-# --- GARANTIR QUE OS MODELOS ESTEJAM CARREGADOS ANTES DO create_all ---
-from src.models.patient import Patient  # tabela 'patients'
-from src.admin.models.campaign import (
-    WaCampaign, WaCampaignRecipient, WaCampaignRun  # tabelas wa_campaigns, wa_campaign_recipients, wa_campaign_runs
-)
+try:
+    from src.admin.models.campaign import (
+        WaCampaign, WaCampaignRecipient, WaCampaignRun
+    )
+except Exception as e:
+    print(f"[BOOT][WARN] campaign models not loaded: {e}")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -46,18 +50,18 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__, static_folder=os.path.join(os.path.dirname(__file__), "static"))
 app.config["SECRET_KEY"] = os.getenv("APP_SECRET", "change-me")
 
-# DB URL
+# ---- Config DB
 database_url = os.getenv("DATABASE_URL")
 if database_url and database_url.startswith("postgres://"):
     database_url = database_url.replace("postgres://", "postgresql://", 1)
 app.config["SQLALCHEMY_DATABASE_URI"] = database_url or f"sqlite:///{os.path.join(os.path.dirname(__file__), 'app.db')}"
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
-# Inicializa extensões
+# ---- Extensões
 CORS(app)
 db.init_app(app)
 
-# ✅ Criar/garantir tabelas na carga do app (idempotente)
+# ---- Cria as tabelas (idempotente)
 with app.app_context():
     try:
         db.create_all()
@@ -65,7 +69,7 @@ with app.app_context():
     except Exception:
         logger.exception("⚠️ DB create_all falhou")
 
-# Registrar blueprints
+# ---- Registra rotas
 app.register_blueprint(user_bp, url_prefix="/api/users")
 app.register_blueprint(patient_bp, url_prefix="/api/patients")
 app.register_blueprint(reminder_bp, url_prefix="/api/reminders")
@@ -80,6 +84,25 @@ app.register_blueprint(iclinic_bp, url_prefix="/api/iclinic")
 app.register_blueprint(admin_tasks_bp, url_prefix="/admin/api")
 app.register_blueprint(admin_patient_bp, url_prefix="/admin/api")
 app.register_blueprint(admin_bp, url_prefix="/admin")
+
+# ---- Importa schedulers de forma segura (não travar boot se faltar algo)
+def _safe_import_schedulers():
+    init_campaign_scheduler = None
+    init_uetg_scheduler = None
+
+    try:
+        from src.admin.services.scheduler_service import init_campaign_scheduler as _ics
+        init_campaign_scheduler = _ics
+    except Exception as e:
+        logger.warning(f"[BOOT][WARN] Campaign scheduler not loaded: {e}")
+
+    try:
+        from src.jobs.uetg_scheduler import init_scheduler as _iu
+        init_uetg_scheduler = _iu
+    except Exception as e:
+        logger.warning(f"[BOOT][WARN] u-ETG scheduler not loaded: {e}")
+
+    return init_campaign_scheduler, init_uetg_scheduler
 
 @app.route("/")
 def index():
@@ -115,24 +138,28 @@ def static_files(filename):
 
 if __name__ == "__main__":
     with app.app_context():
+        # Garantir tabelas novamente (inofensivo)
         try:
-            # já rodamos create_all acima; manter aqui é redundante mas inofensivo
             db.create_all()
-            logger.info("Database tables verified at startup")
         except Exception:
             logger.exception("Error creating tables on startup")
 
-        try:
-            init_scheduler()
-            logger.info("u-ETG Scheduler initialized")
-        except Exception:
-            logger.exception("Error initializing u-ETG scheduler")
+        # Tentar ligar schedulers sem quebrar app
+        init_campaign_scheduler, init_uetg_scheduler = _safe_import_schedulers()
 
-        try:
-            init_campaign_scheduler()
-            logger.info("Campaign Scheduler initialized")
-        except Exception as e:
-            logger.warning(f"Campaign scheduler disabled: {e}")
+        if init_uetg_scheduler:
+            try:
+                init_uetg_scheduler()
+                logger.info("✅ u-ETG Scheduler initialized")
+            except Exception:
+                logger.exception("Error initializing u-ETG scheduler")
+
+        if init_campaign_scheduler:
+            try:
+                init_campaign_scheduler()
+                logger.info("✅ Campaign Scheduler initialized")
+            except Exception as e:
+                logger.warning(f"Campaign scheduler disabled: {e}")
 
     port = int(os.getenv("PORT", 8080))
     debug = os.getenv("FLASK_ENV") == "development"
