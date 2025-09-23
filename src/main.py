@@ -25,9 +25,7 @@ from src.routes.scheduler import scheduler_bp
 from src.routes.iclinic import iclinic_bp
 from src.routes.admin_tasks import admin_tasks_bp
 from src.routes.admin_patient import admin_patient_bp
-# >>> alteração aqui: usar o módulo renomeado do admin (evita conflito com a pasta routes/)
-from src.admin.admin_ui import admin_bp
-# <<<
+from src.admin.routes import admin_bp
 from src.admin.services.scheduler_service import init_campaign_scheduler
 from src.jobs.uetg_scheduler import init_scheduler
 
@@ -45,6 +43,14 @@ app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 CORS(app)
 db.init_app(app)
+
+# >>>>>>> ENSURE TABLES ON IMPORT (sempre que subir o app) <<<<<<<
+try:
+    with app.app_context():
+        db.create_all()
+        logger.info("✅ DB tables ensured (create_all)")
+except Exception:
+    logger.exception("⚠️ DB create_all failed")
 
 # Register blueprints
 app.register_blueprint(user_bp, url_prefix="/api/users")
@@ -86,6 +92,7 @@ def static_files(filename):
 if __name__ == "__main__":
     with app.app_context():
         try:
+            # Já garantimos create_all acima; mantemos aqui por redundância segura
             db.create_all()
             logger.info("Database tables created/verified")
         except Exception:
