@@ -9,7 +9,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from flask import Flask, send_from_directory, jsonify
 from flask_cors import CORS
-from datetime import datetime
 
 # ---- DB base
 from src.models.user import db
@@ -28,7 +27,13 @@ from src.routes.scheduler import scheduler_bp
 from src.routes.iclinic import iclinic_bp
 from src.routes.admin_tasks import admin_tasks_bp
 from src.routes.admin_patient import admin_patient_bp
-from src.admin.routes import admin_bp  # UI do Admin
+
+# ---- Admin UI (import direto do módulo correto; se falhar, não derruba o app)
+admin_bp = None
+try:
+    from src.admin.routes.admin import admin_bp  # <- caminho direto
+except Exception as e:
+    print(f"[BOOT][WARN] admin_bp not loaded: {e}")
 
 # ---- Modelos que precisam existir antes do create_all()
 # (se algum faltar, não quebra o boot)
@@ -38,6 +43,7 @@ except Exception as e:
     print(f"[BOOT][WARN] patient model not loaded: {e}")
 
 try:
+    # modelos de campanha; em SQLite, você já ajustou JSONB/UUID/ARRAY para tipos compatíveis
     from src.admin.models.campaign import (
         WaCampaign, WaCampaignRecipient, WaCampaignRun
     )
@@ -83,26 +89,19 @@ app.register_blueprint(scheduler_bp, url_prefix="/api/scheduler")
 app.register_blueprint(iclinic_bp, url_prefix="/api/iclinic")
 app.register_blueprint(admin_tasks_bp, url_prefix="/admin/api")
 app.register_blueprint(admin_patient_bp, url_prefix="/admin/api")
-app.register_blueprint(admin_bp, url_prefix="/admin")
 
-# ---- Importa schedulers de forma segura (não travar boot se faltar algo)
-def _safe_import_schedulers():
-    init_campaign_scheduler = None
-    init_uetg_scheduler = None
-
-    try:
-        from src.admin.services.scheduler_service import init_campaign_scheduler as _ics
-        init_campaign_scheduler = _ics
-    except Exception as e:
-        logger.warning(f"[BOOT][WARN] Campaign scheduler not loaded: {e}")
-
-    try:
-        from src.jobs.uetg_scheduler import init_scheduler as _iu
-        init_uetg_scheduler = _iu
-    except Exception as e:
-        logger.warning(f"[BOOT][WARN] u-ETG scheduler not loaded: {e}")
-
-    return init_campaign_scheduler, init_uetg_scheduler
+if admin_bp:
+    app.register_blueprint(admin_bp, url_prefix="/admin")
+else:
+    # fallback amigável para evitar 404 total se o Admin não carregar
+    @app.route("/admin")
+    @app.route("/admin/")
+    def admin_unavailable():
+        return jsonify({
+            "ok": False,
+            "error": "Admin UI not loaded",
+            "hint": "verifique src/admin/routes/admin.py e dependências"
+        }), 503
 
 @app.route("/")
 def index():
@@ -129,38 +128,48 @@ def health():
         "status":"healthy",
         "version":"1.0.0",
         "database":db_status,
-        "admin_enabled":True
+        "admin_enabled": bool(admin_bp)
     })
 
 @app.route("/static/<path:filename>")
 def static_files(filename):
     return send_from_directory(app.static_folder, filename)
 
+# ---- Importa schedulers de forma segura (não travar boot se faltar algo)
+def _safe_import_schedulers():
+    init_campaign_scheduler = None
+    init_uetg_scheduler = None
+    try:
+        from src.admin.services.scheduler_service import init_campaign_scheduler as _ics
+        init_campaign_scheduler = _ics
+    except Exception as e:
+        logger.warning(f"[BOOT][WARN] Campaign scheduler not loaded: {e}")
+    try:
+        from src.jobs.uetg_scheduler import init_scheduler as _iu
+        init_uetg_scheduler = _iu
+    except Exception as e:
+        logger.warning(f"[BOOT][WARN] u-ETG scheduler not loaded: {e}")
+    return init_campaign_scheduler, init_uetg_scheduler
+
 if __name__ == "__main__":
     with app.app_context():
-        # Garantir tabelas novamente (inofensivo)
         try:
             db.create_all()
         except Exception:
             logger.exception("Error creating tables on startup")
-
-        # Tentar ligar schedulers sem quebrar app
         init_campaign_scheduler, init_uetg_scheduler = _safe_import_schedulers()
-
         if init_uetg_scheduler:
             try:
                 init_uetg_scheduler()
                 logger.info("✅ u-ETG Scheduler initialized")
             except Exception:
                 logger.exception("Error initializing u-ETG scheduler")
-
         if init_campaign_scheduler:
             try:
                 init_campaign_scheduler()
                 logger.info("✅ Campaign Scheduler initialized")
             except Exception as e:
                 logger.warning(f"Campaign scheduler disabled: {e}")
-
     port = int(os.getenv("PORT", 8080))
     debug = os.getenv("FLASK_ENV") == "development"
     logger.info(f"Starting on port {port} (debug={debug})")
