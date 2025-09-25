@@ -72,3 +72,12 @@ def force_uetg_send():
             'error': str(e)
         }), 500
 
+@admin_tasks_bp.route("/_routes", methods=["GET"])
+def _list_routes():
+    from flask import current_app, jsonify
+    rules = []
+    for r in current_app.url_map.iter_rules():
+        methods = sorted([m for m in r.methods if m not in ("HEAD","OPTIONS")])
+        rules.append({"rule": str(r), "endpoint": r.endpoint, "methods": methods})
+    rules = sorted(rules, key=lambda x: x["rule"])
+    return jsonify({"ok": True, "routes": rules})
