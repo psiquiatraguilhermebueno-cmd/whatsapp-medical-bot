@@ -1,4 +1,3 @@
-# Compatibility shim to avoid double table mapping.
-# This file exposes Patient from the canonical 'patients' module.
+# src/models/patient.py
+# Shim: reexporta o modelo canônico para compatibilidade com imports antigos.
 from src.models.patients import Patient  # noqa: F401
-__all__ = ["Patient"]
