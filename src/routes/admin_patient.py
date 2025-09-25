@@ -72,3 +72,26 @@ def create_patient():
         return jsonify({"ok": False, "error": "integrity_error", "detail": detail}), 409
 
     return jsonify({"ok": True, "created": True, "patient": new_patient.to_dict()}), 201
+
+
+@admin_patient_bp.route("/patients/search", methods=["GET"])
+def search_patients():
+    from sqlalchemy import or_, func
+    q = (request.args.get("q") or "").strip()
+    try:
+        limit = int(request.args.get("limit") or 10)
+    except Exception:
+        limit = 10
+    limit = max(1, min(limit, 100))
+    query = Patient.query
+    if q:
+        ql = q.lower()
+        query = query.filter(
+            or_(
+                func.lower(Patient.name).contains(ql),
+                func.lower(Patient.phone_e164).contains(ql),
+                func.lower(Patient.tags).contains(ql),
+            )
+        )
+    items = query.order_by(Patient.created_at.desc()).limit(limit).all()
+    return jsonify({"ok": True, "count": len(items), "items": [p.to_dict() for p in items]})

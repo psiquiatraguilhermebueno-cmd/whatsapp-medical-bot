@@ -56,7 +56,23 @@
       <div id="recentBox" class="muted">carregando…</div>
       <ul id="recentList"></ul>
     </section>
-  </main>
+  
+<section class="card">
+  <h2>Buscar pacientes</h2>
+  <form id="searchForm">
+    <div class="row">
+      <div class="col">
+        <input id="q" placeholder="Nome, telefone ou tag" required/>
+      </div>
+      <div class="col">
+        <button id="searchBtn" type="submit">Buscar</button>
+      </div>
+    </div>
+  </form>
+  <ul id="searchResults" class="list"></ul>
+</section>
+
+</main>
 
   <script>
     const $ = s => document.querySelector(s);
@@ -153,4 +169,26 @@
     });
   </script>
 </body>
+
+<script>
+async function searchPatients(ev){
+  ev && ev.preventDefault && ev.preventDefault();
+  const q = document.querySelector('#q').value.trim();
+  const ul = document.querySelector('#searchResults');
+  ul.innerHTML = '';
+  if(!q){ return; }
+  const res = await api('/admin/api/patients/search?q=' + encodeURIComponent(q));
+  if(!res || !res.items){ return; }
+  res.items.forEach(p => {
+    const li = document.createElement('li');
+    li.textContent = `${p.name} — ${p.phone_e164} ${p.tags ? '('+p.tags+')' : ''}`;
+    ul.appendChild(li);
+  });
+}
+document.addEventListener('DOMContentLoaded', () => {
+  const sf = document.querySelector('#searchForm');
+  if(sf){ sf.addEventListener('submit', searchPatients); }
+});
+</script>
+
 </html>
