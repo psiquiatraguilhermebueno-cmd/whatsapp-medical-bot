@@ -1,55 +1,156 @@
+# src/main.py
 import os
 import sys
 import logging
+from datetime import datetime
 from sqlalchemy import text
 
-# DON'T CHANGE THIS !!!
+# --- PATH BASE (não alterar) ---
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from flask import Flask, send_from_directory, jsonify, request
-from flask_cors import CORS
-from datetime import datetime
+from flask import Flask, jsonify, send_from_directory  # noqa: E402
+from flask_cors import CORS  # noqa: E402
 
-# Extensões e blueprints do projeto
-from src.models.user import db
-from src.routes.user import user_bp
-from src.routes.patient import patient_bp
-from src.routes.reminder import reminder_bp
-from src.routes.response import response_bp
-from src.routes.scale import scale_bp
-from src.routes.whatsapp import whatsapp_bp
-from src.routes.telegram import telegram_bp
-from src.routes.medication import medication_bp
-from src.routes.mood import mood_bp
-from src.routes.scheduler import scheduler_bp
-from src.routes.iclinic import iclinic_bp
-from src.routes.admin_tasks import admin_tasks_bp
-from src.routes.admin_patient import admin_patient_bp
-from src.admin.routes import admin_bp
-from src.admin.services.scheduler_service import init_campaign_scheduler
-from src.jobs.uetg_scheduler import init_scheduler
-
+# --- LOGGING BÁSICO ---
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+    level=os.getenv("LOG_LEVEL", "INFO"),
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("main")
 
+# --- APP / CONFIG DB ---
 app = Flask(__name__, static_folder=os.path.join(os.path.dirname(__file__), "static"))
 app.config["SECRET_KEY"] = os.getenv("APP_SECRET", "change-me")
 
-# DB config
-database_url = os.getenv("DATABASE_URL")
-if database_url and database_url.startswith("postgres://"):
+# URL do banco (ajuste postgres:// -> postgresql://)
+database_url = os.getenv("DATABASE_URL", "").strip()
+if database_url.startswith("postgres://"):
     database_url = database_url.replace("postgres://", "postgresql://", 1)
-app.config["SQLALCHEMY_DATABASE_URI"] = database_url or f"sqlite:///{os.path.join(os.path.dirname(__file__), 'app.db')}"
+if not database_url:
+    # fallback sqlite local
+    database_url = f"sqlite:///{os.path.join(os.path.dirname(__file__), 'app.db')}"
+
+app.config["SQLALCHEMY_DATABASE_URI"] = database_url
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
-# Inicializações
-CORS(app)
-db.init_app(app)
+# Extensão do projeto
+from src.models.user import db  # noqa: E402
 
-# Registrar blueprints (inclui /admin)
+CORS(app)
+
+# ---------- BLUEPRINTS (rotas públicas) ----------
+# Rotas de API “core”
+from src.routes.user import user_bp  # noqa: E402
+from src.routes.patient import patient_bp  # noqa: E402
+from src.routes.reminder import reminder_bp  # noqa: E402
+from src.routes.response import response_bp  # noqa: E402
+from src.routes.scale import scale_bp  # noqa: E402
+from src.routes.whatsapp import whatsapp_bp  # noqa: E402
+from src.routes.telegram import telegram_bp  # noqa: E402
+from src.routes.medication import medication_bp  # noqa: E402
+from src.routes.mood import mood_bp  # noqa: E402
+from src.routes.scheduler import scheduler_bp  # noqa: E402
+from src.routes.iclinic import iclinic_bp  # noqa: E402
+
+# Admin APIs (REST utilitárias usadas pela UI)
+from src.routes.admin_tasks import admin_tasks_bp  # noqa: E402
+from src.routes.admin_patient import admin_patient_bp  # noqa: E402
+
+# Jobs / agendadores
+from src.jobs.uetg_scheduler import init_scheduler  # noqa: E402
+
+# Admin UI (carregamos mais abaixo com try/except)
+_admin_loaded = False
+_admin_load_error = None
+
+# Estado de boot
+_MAIN_LOADED = False
+_BOOT_ERROR = None
+
+
+def _load_models_safely():
+    """
+    Importa MODELOS que participam do create_all(), de forma defensiva.
+    IMPORTANTE: usar o alias Patient de src.models.patient (que aponta para 'patients'),
+    para evitar criar a tabela duas vezes.
+    """
+    problems = []
+
+    # Pacientes (usar SEMPRE o alias Patient)
+    try:
+        from src.models.patient import Patient  # noqa: F401
+    except Exception as e:
+        problems.append(f"patient model not loaded: {e}")
+
+    # Demais modelos que referenciam patients.id
+    try:
+        from src.models.reminder import Reminder  # noqa: F401
+    except Exception as e:
+        problems.append(f"reminder model not loaded: {e}")
+
+    try:
+        from src.models.medication import Medication  # noqa: F401
+    except Exception as e:
+        problems.append(f"medication model not loaded: {e}")
+
+    # Exercício de respiração (usado por Reminder)
+    try:
+        from src.models.breathing_exercise import BreathingExercise  # noqa: F401
+    except Exception as e:
+        problems.append(f"breathing_exercise model not loaded: {e}")
+
+    # Modelos opcionais (toleramos ausência)
+    for name, importer in [
+        ("mood", lambda: __import__("src.models.mood", fromlist=["*"])),
+    ]:
+        try:
+            importer()
+        except Exception as e:
+            logger.warning(f"{name} model not loaded: {e}")
+
+    # Campanhas (opcional / tolerante a erro para não derrubar Admin)
+    try:
+        __import__("src.admin.models.campaign", fromlist=["*"])
+    except Exception as e:
+        logger.warning(f"campaign models not loaded: {e}")
+
+    if problems:
+        for p in problems:
+            logger.warning(p)
+
+
+def _load_admin_blueprint():
+    """
+    Carrega a UI de Admin. Se falhar, deixa um endpoint de diagnóstico em /admin.
+    """
+    global _admin_loaded, _admin_load_error
+    try:
+        from src.admin.routes import admin_bp  # noqa: F401
+        app.register_blueprint(admin_bp, url_prefix="/admin")
+        _admin_loaded = True
+        logger.info("Admin UI loaded")
+    except Exception as e:
+        _admin_load_error = str(e)
+        _admin_loaded = False
+        logger.warning(f"admin_bp not loaded: {e}")
+
+        @app.route("/admin")
+        @app.route("/admin/")
+        def _admin_fallback():
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "error": "Admin UI not loaded",
+                        "hint": "verifique src/admin/routes/admin.py e dependências",
+                        "detail": _admin_load_error,
+                    }
+                ),
+                503,
+            )
+
+
+# ---------- Registro dos blueprints de API ----------
 app.register_blueprint(user_bp, url_prefix="/api/users")
 app.register_blueprint(patient_bp, url_prefix="/api/patients")
 app.register_blueprint(reminder_bp, url_prefix="/api/reminders")
@@ -63,16 +164,20 @@ app.register_blueprint(scheduler_bp, url_prefix="/api/scheduler")
 app.register_blueprint(iclinic_bp, url_prefix="/api/iclinic")
 app.register_blueprint(admin_tasks_bp, url_prefix="/admin/api")
 app.register_blueprint(admin_patient_bp, url_prefix="/admin/api")
-app.register_blueprint(admin_bp, url_prefix="/admin")
 
+
+# ---------- Rotas básicas ----------
 @app.route("/")
 def index():
-    return jsonify({
-        "service": "whatsapp-medical-bot",
-        "status": "running",
-        "version": "1.0.0",
-        "admin_url": "/admin"
-    })
+    return jsonify(
+        {
+            "service": "whatsapp-medical-bot",
+            "status": "running",
+            "version": "1.0.0",
+            "admin_url": "/admin",
+        }
+    )
+
 
 @app.route("/health")
 def health():
@@ -82,51 +187,97 @@ def health():
             conn.execute(text("SELECT 1"))
             conn.close()
         db_status = "connected"
+        status = "healthy"
     except Exception as e:
         logger.exception("DB health check failed")
         db_status = f"error: {e.__class__.__name__}"
-    return jsonify({
-        "service": "whatsapp-medical-bot",
-        "status": "healthy",
-        "version": "1.0.0",
-        "database": db_status,
-        "admin_enabled": True
-    })
+        status = "degraded"
+
+    return jsonify(
+        {
+            "service": "whatsapp-medical-bot",
+            "status": status,
+            "version": "1.0.0",
+            "database": db_status,
+            "admin_enabled": _admin_loaded,
+        }
+    )
+
 
 @app.route("/static/<path:filename>")
 def static_files(filename):
     return send_from_directory(app.static_folder, filename)
 
-if __name__ == "__main__":
-    with app.app_context():
-        # Pré-carrega apenas modelos essenciais e leves (evita crash do import)
-        for module in ("src.models.patient", "src.models.breathing_exercise"):
-            try:
-                __import__(module, fromlist=["*"])
-            except Exception as e:
-                logger.warning(f"{module} not loaded: {e}")
 
-        # Cria tabelas disponíveis; se algo falhar, loga e segue
+@app.route("/ops/boot-state")
+def boot_state():
+    # Endpoint utilizado pelos workflows/monitoramento
+    if _MAIN_LOADED:
+        return jsonify({"main_loaded": True, "source": "main_boot", "last_attempt": datetime.utcnow().isoformat() + "Z"})
+    else:
+        err = _BOOT_ERROR or "unknown"
+        return jsonify(
+            {
+                "main_loaded": False,
+                "source": "exception",
+                "error_type": getattr(err, "__class__", type("E", (), {})).__name__ if hasattr(err, "__class__") else "Exception",
+                "summary": str(err),
+                "file": "src/main.py",
+                "line": 0,
+                "last_attempt": datetime.utcnow().isoformat() + "Z",
+            }
+        )
+
+
+def _init_app():
+    """
+    Inicializa modelos, cria tabelas, agenda jobs e carrega Admin.
+    Seta variáveis globais para o /ops/boot-state.
+    """
+    global _MAIN_LOADED, _BOOT_ERROR
+
+    try:
+        _load_models_safely()
+
+        # Cria/garante tabelas
         try:
             db.create_all()
-            logger.info("DB tables created/verified")
         except Exception as e:
-            logger.error("⚠️ DB create_all falhou", exc_info=e)
+            logger.error("⚠️ DB create_all falhou", exc_info=True)
+            raise
 
-        # Schedulers (não derrubam o app se falharem)
+        # Jobs
         try:
             init_scheduler()
             logger.info("u-ETG Scheduler initialized")
-        except Exception as e:
+        except Exception:
             logger.exception("Error initializing u-ETG scheduler")
 
-        try:
-            init_campaign_scheduler()
-            logger.info("Campaign Scheduler initialized")
-        except Exception as e:
-            logger.warning(f"Campaign scheduler disabled: {e}")
+        # Admin UI
+        _load_admin_blueprint()
 
-    port = int(os.getenv("PORT", 8080))
+        _MAIN_LOADED = True
+        _BOOT_ERROR = None
+        logger.info("Main app initialized successfully")
+
+    except Exception as e:
+        _MAIN_LOADED = False
+        _BOOT_ERROR = e
+        logger.exception("Main app failed to initialize")
+
+
+# ---------- Entrada ----------
+if __name__ == "__main__":
+    db.init_app(app)
+    with app.app_context():
+        _init_app()
+
+    port = int(os.getenv("PORT", "8080"))
     debug = os.getenv("FLASK_ENV") == "development"
     logger.info(f"Starting on port {port} (debug={debug})")
     app.run(host="0.0.0.0", port=port, debug=debug)
+else:
+    # Quando rodando via WSGI (Railway), inicializa também
+    db.init_app(app)
+    with app.app_context():
+        _init_app()
