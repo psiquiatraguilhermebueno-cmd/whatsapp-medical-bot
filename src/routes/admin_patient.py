@@ -1,6 +1,5 @@
 from flask import Blueprint, request, jsonify
 from datetime import datetime
-import uuid
 from sqlalchemy.exc import IntegrityError
 
 from src.models.user import db
@@ -15,12 +14,10 @@ def _normalize_phone(raw: str) -> str:
     if digits.startswith("00"):
         digits = digits[2:]
     if digits.startswith("55"):
-        digits = "+" + digits
-    elif raw.startswith("+"):
+        return "+" + digits
+    if raw.startswith("+"):
         return raw
-    else:
-        digits = "+55" + digits
-    return digits
+    return "+55" + digits
 
 @admin_patient_bp.route("/patients", methods=["GET"])
 def list_patients():
@@ -55,7 +52,6 @@ def create_patient():
         return jsonify({"ok": True, "created": False, "patient": existing.to_dict(), "hint": "already_exists"}), 200
 
     new_patient = Patient(
-        id=uuid.uuid4().hex,
         name=name,
         phone_e164=phone,
         tags=tags,
@@ -65,11 +61,12 @@ def create_patient():
     db.session.add(new_patient)
     try:
         db.session.commit()
-    except IntegrityError:
+    except IntegrityError as e:
         db.session.rollback()
         again = Patient.query.filter_by(phone_e164=phone).first()
         if again:
             return jsonify({"ok": True, "created": False, "patient": again.to_dict(), "hint": "already_exists"}), 200
-        return jsonify({"ok": False, "error": "could_not_create"}), 400
+        detail = str(getattr(e, "orig", e))
+        return jsonify({"ok": False, "error": "integrity_error", "detail": detail}), 409
 
     return jsonify({"ok": True, "created": True, "patient": new_patient.to_dict()}), 201
