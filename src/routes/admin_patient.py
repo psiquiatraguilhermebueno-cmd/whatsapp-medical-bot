@@ -1,7 +1,7 @@
 from flask import Blueprint, request, jsonify
-from sqlalchemy.exc import IntegrityError
 from datetime import datetime
-import re, uuid
+import uuid
+from sqlalchemy.exc import IntegrityError
 
 from src.models.user import db
 from src.models.patient import Patient
@@ -9,25 +9,42 @@ from src.models.patient import Patient
 admin_patient_bp = Blueprint("admin_patient_bp", __name__)
 
 def _normalize_phone(raw: str) -> str:
-    digits = re.sub(r"\D+", "", raw or "")
-    if not digits:
+    if not raw:
         return ""
-    if len(digits) in (10, 11) and not digits.startswith("55"):
-        digits = "55" + digits
-    return f"+{digits}"
+    digits = "".join(ch for ch in raw if ch.isdigit())
+    if digits.startswith("00"):
+        digits = digits[2:]
+    if digits.startswith("55"):
+        digits = "+" + digits
+    elif raw.startswith("+"):
+        return raw
+    else:
+        digits = "+55" + digits
+    return digits
 
 @admin_patient_bp.route("/patients", methods=["GET"])
 def list_patients():
-    limit = request.args.get("limit", default=25, type=int)
-    limit = max(1, min(limit, 100))
-    q = Patient.query.order_by(Patient.created_at.desc()).limit(limit).all()
+    try:
+        limit = int(request.args.get("limit", 20))
+    except Exception:
+        limit = 20
+    q = (
+        Patient.query
+        .order_by(Patient.created_at.desc())
+        .limit(max(1, min(limit, 200)))
+        .all()
+    )
     return jsonify({"ok": True, "count": len(q), "items": [p.to_dict() for p in q]})
 
 @admin_patient_bp.route("/patients", methods=["POST"])
 def create_patient():
-    data = request.get_json(silent=True) or {}
+    try:
+        data = request.get_json(force=True) or {}
+    except Exception:
+        return jsonify({"ok": False, "error": "invalid_json"}), 400
+
     name = (data.get("name") or "").strip()
-    phone = _normalize_phone(data.get("phone_e164"))
+    phone = _normalize_phone(data.get("phone_e164") or "")
     tags = (data.get("tags") or "").strip()
 
     if not name or not phone:
