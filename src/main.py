@@ -4,7 +4,7 @@ import sys
 import logging
 from sqlalchemy import text
 
-# Garante que "src" esteja no path
+# garante que "src" é importável
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from flask import Flask, send_from_directory, jsonify
@@ -13,7 +13,72 @@ from flask_cors import CORS
 # ---- DB base
 from src.models.user import db
 
-# ---- Blueprints principais
+# ---- Importa TODOS os modelos antes do create_all (ordem importa!)
+# Tabela 'patient' (singular) usada por FKs
+try:
+    from src.models.patient import Patient
+except Exception as e:
+    print(f"[BOOT][WARN] patient model not loaded: {e}")
+
+# Modelos que referenciam patient (evita NoReferencedTableError)
+try:
+    from src.models.reminder import Reminder
+except Exception as e:
+    print(f"[BOOT][WARN] reminder model not loaded: {e}")
+
+try:
+    from src.models.response import Response
+except Exception as e:
+    print(f"[BOOT][WARN] response model not loaded: {e}")
+
+try:
+    from src.models.medication import Medication
+except Exception as e:
+    print(f"[BOOT][WARN] medication model not loaded: {e}")
+
+try:
+    from src.models.mood import Mood
+except Exception as e:
+    print(f"[BOOT][WARN] mood model not loaded: {e}")
+
+# Tabela 'patients' (plural) esperada pelo Admin
+try:
+    from src.models.patients import Patients
+except Exception as e:
+    print(f"[BOOT][WARN] patients model not loaded: {e}")
+
+# Campanhas WhatsApp (compatíveis com SQLite)
+try:
+    from src.admin.models.campaign import WACampaign, WACampaignRecipient, WACampaignRun
+except Exception as e:
+    print(f"[BOOT][WARN] campaign models not loaded: {e}")
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logger = logging.getLogger(__name__)
+
+app = Flask(__name__, static_folder=os.path.join(os.path.dirname(__file__), "static"))
+app.config["SECRET_KEY"] = os.getenv("APP_SECRET", "change-me")
+
+# ---- Configuração DB
+database_url = os.getenv("DATABASE_URL")
+if database_url and database_url.startswith("postgres://"):
+    database_url = database_url.replace("postgres://", "postgresql://", 1)
+app.config["SQLALCHEMY_DATABASE_URI"] = database_url or f"sqlite:///{os.path.join(os.path.dirname(__file__), 'app.db')}"
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+
+# ---- Extensões
+CORS(app)
+db.init_app(app)
+
+# ---- Cria as tabelas (idempotente), agora que TODOS os modelos foram importados
+with app.app_context():
+    try:
+        db.create_all()
+        logger.info("✅ DB create_all executado: tabelas garantidas (patient, patients, wa_campaigns, ...)")
+    except Exception:
+        logger.exception("⚠️ DB create_all falhou")
+
+# ---- Blueprints (rotas)
 from src.routes.user import user_bp
 from src.routes.patient import patient_bp
 from src.routes.reminder import reminder_bp
@@ -28,60 +93,14 @@ from src.routes.iclinic import iclinic_bp
 from src.routes.admin_tasks import admin_tasks_bp
 from src.routes.admin_patient import admin_patient_bp
 
-# ---- Admin UI (import direto do módulo correto; se falhar, não derruba o app)
+# Admin UI blueprint (depois dos modelos)
 admin_bp = None
 try:
-    from src.admin.routes.admin import admin_bp  # o blueprint do Admin
+    from src.admin.routes.admin import admin_bp
 except Exception as e:
     print(f"[BOOT][WARN] admin_bp not loaded: {e}")
 
-# ---- Modelos que precisam existir antes do create_all()
-# (1) tabela 'patient' (singular), usada por FKs de outros módulos
-try:
-    from src.models.patient import Patient
-except Exception as e:
-    print(f"[BOOT][WARN] patient model not loaded: {e}")
-
-# (2) tabela 'patients' (plural), esperada pelo Admin
-try:
-    from src.models.patients import Patients
-except Exception as e:
-    print(f"[BOOT][WARN] patients model not loaded: {e}")
-
-# (3) campanhas WhatsApp (nomes esperados pelo Admin: WACampaign*)
-try:
-    from src.admin.models.campaign import (
-        WACampaign, WACampaignRecipient, WACampaignRun
-    )
-except Exception as e:
-    print(f"[BOOT][WARN] campaign models not loaded: {e}")
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-logger = logging.getLogger(__name__)
-
-app = Flask(__name__, static_folder=os.path.join(os.path.dirname(__file__), "static"))
-app.config["SECRET_KEY"] = os.getenv("APP_SECRET", "change-me")
-
-# ---- Config DB
-database_url = os.getenv("DATABASE_URL")
-if database_url and database_url.startswith("postgres://"):
-    database_url = database_url.replace("postgres://", "postgresql://", 1)
-app.config["SQLALCHEMY_DATABASE_URI"] = database_url or f"sqlite:///{os.path.join(os.path.dirname(__file__), 'app.db')}"
-app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
-
-# ---- Extensões
-CORS(app)
-db.init_app(app)
-
-# ---- Cria as tabelas (idempotente)
-with app.app_context():
-    try:
-        db.create_all()
-        logger.info("✅ DB create_all executado: tabelas garantidas")
-    except Exception:
-        logger.exception("⚠️ DB create_all falhou")
-
-# ---- Registra rotas
+# Registra rotas
 app.register_blueprint(user_bp, url_prefix="/api/users")
 app.register_blueprint(patient_bp, url_prefix="/api/patients")
 app.register_blueprint(reminder_bp, url_prefix="/api/reminders")
