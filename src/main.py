@@ -27,9 +27,7 @@ database_url = os.getenv("DATABASE_URL", "").strip()
 if database_url.startswith("postgres://"):
     database_url = database_url.replace("postgres://", "postgresql://", 1)
 if not database_url:
-    # fallback sqlite local
     database_url = f"sqlite:///{os.path.join(os.path.dirname(__file__), 'app.db')}"
-
 app.config["SQLALCHEMY_DATABASE_URI"] = database_url
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
@@ -38,7 +36,7 @@ from src.models.user import db  # noqa: E402
 
 CORS(app)
 
-# ---------- BLUEPRINTS (rotas públicas) ----------
+# ---------- BLUEPRINTS (núcleo do u-ETG + utilitários) ----------
 from src.routes.user import user_bp  # noqa: E402
 from src.routes.patient import patient_bp  # noqa: E402
 from src.routes.reminder import reminder_bp  # noqa: E402
@@ -46,26 +44,23 @@ from src.routes.response import response_bp  # noqa: E402
 from src.routes.scale import scale_bp  # noqa: E402
 from src.routes.whatsapp import whatsapp_bp  # noqa: E402
 from src.routes.telegram import telegram_bp  # noqa: E402
-from src.routes.medication import medication_bp  # noqa: E402
-from src.routes.mood import mood_bp  # noqa: E402
 from src.routes.scheduler import scheduler_bp  # noqa: E402
 from src.routes.iclinic import iclinic_bp  # noqa: E402
 
-# Admin APIs (REST utilitárias usadas pela UI)
+# ⚠️ Desligado por ora (evitar import/DDL opcional derrubando boot)
+# from src.routes.medication import medication_bp  # noqa: E402
+# from src.routes.mood import mood_bp  # noqa: E402
+
+# Admin APIs (REST usadas pela UI)
 from src.routes.admin_tasks import admin_tasks_bp  # noqa: E402
 from src.routes.admin_patient import admin_patient_bp  # noqa: E402
 
 # Jobs / agendadores
 from src.jobs.uetg_scheduler import init_scheduler  # noqa: E402
 
-# Admin UI (carregamos mais abaixo com try/except)
-_admin_loaded = False
-_admin_load_error = None
-
 # Estado de boot
 _MAIN_LOADED = False
 _BOOT_ERROR = None
-
 
 def _load_models_safely():
     """
@@ -75,62 +70,42 @@ def _load_models_safely():
     """
     problems = []
 
-    # Pacientes (usar SEMPRE o alias Patient)
+    # Canônico: patients
     try:
         from src.models.patient import Patient  # noqa: F401
     except Exception as e:
         problems.append(f"patient model not loaded: {e}")
 
-    # Demais modelos que referenciam patients.id
+    # Núcleo que depende de patients
     try:
         from src.models.reminder import Reminder  # noqa: F401
     except Exception as e:
         problems.append(f"reminder model not loaded: {e}")
 
     try:
-        from src.models.medication import Medication  # noqa: F401
+        from src.models.response import Response  # noqa: F401
     except Exception as e:
-        problems.append(f"medication model not loaded: {e}")
+        problems.append(f"response model not loaded: {e}")
 
-    # Exercício de respiração (usado por Reminder)
     try:
         from src.models.breathing_exercise import BreathingExercise  # noqa: F401
     except Exception as e:
         problems.append(f"breathing_exercise model not loaded: {e}")
 
-    # Modelos opcionais (toleramos ausência)
-    for name, importer in [
-        ("mood", lambda: __import__("src.models.mood", fromlist=["*"])),
-    ]:
-        try:
-            importer()
-        except Exception as e:
-            logger.warning(f"{name} model not loaded: {e}")
-
-    # Campanhas (opcional / tolerante a erro para não derrubar Admin)
-    try:
-        __import__("src.admin.models.campaign", fromlist=["*"])
-    except Exception as e:
-        logger.warning(f"campaign models not loaded: {e}")
+    # ⚠️ NÃO importar campanhas nem módulos opcionais aqui.
+    # Eles serão reintroduzidos depois que u-ETG estiver estável.
 
     if problems:
         for p in problems:
             logger.warning(p)
 
-
 def _load_admin_blueprint():
-    """
-    Carrega a UI de Admin. Se falhar, deixa um endpoint de diagnóstico em /admin.
-    """
-    global _admin_loaded, _admin_load_error
+    """Carrega a UI de Admin. Se falhar, deixa um endpoint de diagnóstico em /admin."""
     try:
         from src.admin.routes import admin_bp  # noqa: F401
         app.register_blueprint(admin_bp, url_prefix="/admin")
-        _admin_loaded = True
         logger.info("Admin UI loaded")
     except Exception as e:
-        _admin_load_error = str(e)
-        _admin_loaded = False
         logger.warning(f"admin_bp not loaded: {e}")
 
         @app.route("/admin")
@@ -142,12 +117,11 @@ def _load_admin_blueprint():
                         "ok": False,
                         "error": "Admin UI not loaded",
                         "hint": "verifique src/admin/routes/admin.py e dependências",
-                        "detail": _admin_load_error,
+                        "detail": str(e),
                     }
                 ),
                 503,
             )
-
 
 # ---------- Registro dos blueprints de API ----------
 app.register_blueprint(user_bp, url_prefix="/api/users")
@@ -157,13 +131,14 @@ app.register_blueprint(response_bp, url_prefix="/api/responses")
 app.register_blueprint(scale_bp, url_prefix="/api/scales")
 app.register_blueprint(whatsapp_bp, url_prefix="/api/whatsapp")
 app.register_blueprint(telegram_bp, url_prefix="/api/telegram")
-app.register_blueprint(medication_bp, url_prefix="/api/medications")
-app.register_blueprint(mood_bp, url_prefix="/api/moods")
 app.register_blueprint(scheduler_bp, url_prefix="/api/scheduler")
 app.register_blueprint(iclinic_bp, url_prefix="/api/iclinic")
 app.register_blueprint(admin_tasks_bp, url_prefix="/admin/api")
 app.register_blueprint(admin_patient_bp, url_prefix="/admin/api")
 
+# ⚠️ Desligado por ora
+# app.register_blueprint(medication_bp, url_prefix="/api/medications")
+# app.register_blueprint(mood_bp, url_prefix="/api/moods")
 
 # ---------- Rotas básicas ----------
 @app.route("/")
@@ -176,7 +151,6 @@ def index():
             "admin_url": "/admin",
         }
     )
-
 
 @app.route("/health")
 def health():
@@ -198,13 +172,11 @@ def health():
             "status": status,
             "version": "1.0.0",
             "database": db_status,
-            "admin_enabled": _admin_loaded,
         }
     )
 
-
 def _boot_state():
-    """View real do /ops/boot-state (definida sem decorator para evitar duplicata)."""
+    """/ops/boot-state (sem decorator para evitar conflitos de endpoint)."""
     if _MAIN_LOADED:
         return jsonify(
             {
@@ -229,72 +201,57 @@ def _boot_state():
             }
         )
 
-
 def _register_boot_state_route():
-    """Registra /ops/boot-state de forma idempotente (sem 'overwriting endpoint')."""
+    """Registra /ops/boot-state de forma idempotente."""
     endpoint_name = "ops_boot_state"
     if endpoint_name not in app.view_functions:
         app.add_url_rule("/ops/boot-state", endpoint=endpoint_name, view_func=_boot_state)
 
-
 def _init_app():
-    """
-    Inicializa modelos, cria tabelas, agenda jobs e carrega Admin.
-    Seta variáveis globais para o /ops/boot-state.
-    """
+    """Inicializa modelos, cria tabelas, agenda jobs e carrega Admin."""
     global _MAIN_LOADED, _BOOT_ERROR
-
     try:
         _load_models_safely()
 
-        # Cria/garante tabelas
         try:
             db.create_all()
         except Exception:
-            logger.error("⚠️ DB create_all falhou", exc_info=True)
+            logging.error("⚠️ DB create_all falhou", exc_info=True)
             raise
 
-        # Jobs
         try:
             init_scheduler()
             logger.info("u-ETG Scheduler initialized")
         except Exception:
             logger.exception("Error initializing u-ETG scheduler")
 
-        # Admin UI
         _load_admin_blueprint()
 
         _MAIN_LOADED = True
         _BOOT_ERROR = None
         logger.info("Main app initialized successfully")
-
     except Exception as e:
         _MAIN_LOADED = False
         _BOOT_ERROR = e
         logger.exception("Main app failed to initialize")
     finally:
-        # Sempre registra o endpoint de diagnóstico de boot, mesmo em erro.
         _register_boot_state_route()
-
 
 # ---------- Entrada ----------
 if __name__ == "__main__":
     db.init_app(app)
     with app.app_context():
         _init_app()
-
     port = int(os.getenv("PORT", "8080"))
     debug = os.getenv("FLASK_ENV") == "development"
     logger.info(f"Starting on port {port} (debug={debug})")
     app.run(host="0.0.0.0", port=port, debug=debug)
 else:
-    # Quando rodando via WSGI (Railway), inicializa também
     db.init_app(app)
     with app.app_context():
         _init_app()
 
-
-# Arquivos estáticos (se usar)
+# Arquivos estáticos
 @app.route("/static/<path:filename>")
 def static_files(filename):
     return send_from_directory(app.static_folder, filename)
