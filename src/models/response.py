@@ -1,16 +1,29 @@
-from flask_sqlalchemy import SQLAlchemy
+# src/models/response.py
 from datetime import datetime
 from src.models.user import db
 
 class Response(db.Model):
+    __tablename__ = 'response'  # mantém o nome singular para compatibilidade
+
     id = db.Column(db.Integer, primary_key=True)
-    patient_id = db.Column(db.Integer, db.ForeignKey('patient.id'), nullable=False)
-    reminder_id = db.Column(db.Integer, db.ForeignKey('reminder.id'), nullable=False)
-    response_data = db.Column(db.JSON, nullable=True)  # Para armazenar respostas de escalas
-    media_url = db.Column(db.String(500), nullable=True)  # Para vídeos/fotos
-    text_response = db.Column(db.Text, nullable=True)  # Para respostas de texto
-    score = db.Column(db.Integer, nullable=True)  # Pontuação da escala
-    is_alarming = db.Column(db.Boolean, default=False)  # Se a pontuação é alarmante
+
+    # FK corrigida: agora aponta para 'patients.id' (plural) e casa com o tipo String(64)
+    patient_id = db.Column(db.String(64), db.ForeignKey('patients.id'), nullable=False, index=True)
+
+    # Mantém referência para a tabela 'reminder' (singular), que é o __tablename__ padrão da classe Reminder
+    reminder_id = db.Column(db.Integer, db.ForeignKey('reminder.id'), nullable=False, index=True)
+
+    # Dados da resposta (ex.: respostas de escalas)
+    response_data = db.Column(db.JSON, nullable=True)
+
+    # Anexos e texto livre
+    media_url = db.Column(db.String(500), nullable=True)
+    text_response = db.Column(db.Text, nullable=True)
+
+    # Pontuação de escala e flag clínica
+    score = db.Column(db.Integer, nullable=True)
+    is_alarming = db.Column(db.Boolean, default=False)
+
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     def __repr__(self):
@@ -28,4 +41,3 @@ class Response(db.Model):
             'is_alarming': self.is_alarming,
             'created_at': self.created_at.isoformat() if self.created_at else None
         }
-
