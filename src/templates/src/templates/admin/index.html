@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <title>Admin • u-ETG</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { --bg:#0b1020; --card:#141a32; --soft:#212a4a; --text:#e7ecf8; --muted:#a9b3c9; --ok:#30d158; --warn:#ff9f0a; --err:#ff453a; --link:#7aa2ff; }
+    * { box-sizing:border-box; }
+    html,body { margin:0; padding:0; height:100%; background:var(--bg); color:var(--text); font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, 'Helvetica Neue', Arial, 'Noto Sans', 'Apple Color Emoji', 'Segoe UI Emoji'; }
+    a { color:var(--link); text-decoration:none; }
+    a:hover { text-decoration:underline; }
+    header { position:sticky; top:0; backdrop-filter:saturate(1.2) blur(8px); background:rgba(11,16,32,.7); border-bottom:1px solid #1b2340; }
+    .wrap { max-width:1100px; margin:0 auto; padding:16px; }
+    .row { display:flex; gap:16px; flex-wrap:wrap; }
+    .col { flex:1 1 260px; }
+    .card { background:var(--card); border:1px solid #1b2340; border-radius:16px; padding:16px; box-shadow: 0 10px 30px rgba(0,0,0,.25); }
+    .card h3 { margin:0 0 8px; font-size:18px; }
+    .kpi { font-size:32px; font-weight:700; letter-spacing:.5px; }
+    .muted { color:var(--muted); }
+    nav { display:flex; gap:10px; flex-wrap:wrap; }
+    nav a, .btn { display:inline-block; padding:10px 14px; border-radius:10px; border:1px solid #283258; background:linear-gradient(180deg,#1a2242,#121a36); color:var(--text); cursor:pointer; }
+    nav a.active, .btn.primary { border-color:#3b82f6; box-shadow:0 0 0 2px rgba(59,130,246,.25) inset; }
+    .btn.ok { border-color:#2bbf4b; }
+    .btn.warn { border-color:#e6930a; }
+    .btn.err { border-color:#d63a32; }
+    .grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(280px,1fr)); gap:16px; }
+    .list { display:flex; flex-direction:column; gap:10px; }
+    input, select, textarea { width:100%; padding:12px 14px; border-radius:10px; border:1px solid #283258; background:#0e1430; color:var(--text); }
+    label { display:block; margin:10px 0 6px; font-size:14px; color:var(--muted); }
+    form .actions { display:flex; gap:10px; margin-top:12px; }
+    .toast { position:fixed; right:18px; bottom:18px; background:#0e1430; border:1px solid #283258; padding:12px 14px; border-radius:10px; min-width:200px; box-shadow:0 10px 30px rgba(0,0,0,.3); display:none; }
+    .toast.ok { border-color:#30d158; }
+    .toast.err { border-color:#ff453a; }
+    .tag { display:inline-block; padding:2px 8px; border:1px solid #2a335a; border-radius:999px; font-size:12px; color:var(--muted); }
+    footer { color:var(--muted); font-size:12px; padding:24px 0; }
+    .hr { height:1px; background:#1b2340; margin:12px 0; border:0;}
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <div class="row" style="align-items:center">
+        <div style="font-weight:700; letter-spacing:.5px;">u-ETG • Admin</div>
+        <nav id="nav">
+          <a href="#/dashboard" data-route="/dashboard" class="active">Dashboard</a>
+          <a href="#/patients/new" data-route="/patients/new">Novo Paciente</a>
+          <a href="#/campaigns/new" data-route="/campaigns/new">Nova Campanha</a>
+        </nav>
+      </div>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section id="view-dashboard" class="view">
+      <div class="row">
+        <div class="col">
+          <div class="card">
+            <h3>Pacientes</h3>
+            <div class="kpi" id="kpi-patients">—</div>
+            <div class="muted" id="kpi-patients-sub">carregando…</div>
+          </div>
+        </div>
+        <div class="col">
+          <div class="card">
+            <h3>Lembretes</h3>
+            <div class="kpi" id="kpi-reminders">—</div>
+            <div class="muted">ativos/total</div>
+          </div>
+        </div>
+        <div class="col">
+          <div class="card">
+            <h3>Respostas</h3>
+            <div class="kpi" id="kpi-responses">—</div>
+            <div class="muted">últimos 7 dias</div>
+          </div>
+        </div>
+        <div class="col">
+          <div class="card">
+            <h3>Campanhas</h3>
+            <div class="kpi" id="kpi-campaigns">—</div>
+            <div class="muted">WhatsApp</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="hr"></div>
+
+      <div class="grid" id="recent-cards"></div>
+    </section>
+
+    <section id="view-patient-new" class="view" style="display:none;">
+      <div class="card">
+        <h3>Novo Paciente</h3>
+        <p class="muted">Cadastro rápido. Campos mínimos: Nome e Telefone (E.164: ex. 5511999999999).</p>
+        <form id="form-new-patient">
+          <label for="pname">Nome completo</label>
+          <input id="pname" name="name" placeholder="Ex.: Maria Silva" required />
+          <label for="pphone">Telefone (E.164)</label>
+          <input id="pphone" name="phone_e164" placeholder="Ex.: 5511999999999" required />
+          <label for="ptags">Tags (opcional, separadas por vírgula)</label>
+          <input id="ptags" name="tags" placeholder="Ex.: GAD7, grupoA, teste" />
+          <div class="actions">
+            <button type="submit" class="btn primary">Cadastrar</button>
+            <button type="button" class="btn" id="btn-cancel-new">Cancelar</button>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <section id="view-campaign-new" class="view" style="display:none;">
+      <div class="card">
+        <h3>Nova Campanha (placeholder)</h3>
+        <p class="muted">A UI completa de campanhas será carregada aqui quando os modelos/rotas estiverem prontos. Por ora, use os endpoints da API.</p>
+      </div>
+    </section>
+
+    <footer>
+      <div class="wrap muted">Admin • u-ETG — Build SPA mínimo • <span id="env-info"></span></div>
+    </footer>
+  </main>
+
+  <div id="toast" class="toast"></div>
+
+  <script>
+    const $ = sel => document.querySelector(sel);
+    const $$ = sel => Array.from(document.querySelectorAll(sel));
+
+    function toast(msg, kind="ok") {
+      const t = $("#toast");
+      t.className = `toast ${kind}`;
+      t.textContent = msg;
+      t.style.display = "block";
+      setTimeout(() => { t.style.display = "none"; }, 3200);
+    }
+
+    async function getJSON(url) {
+      const r = await fetch(url, { headers: { "Accept":"application/json" }});
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return await r.json();
+    }
+
+    async function postJSON(url, data) {
+      const r = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type":"application/json", "Accept":"application/json" },
+        body: JSON.stringify(data)
+      });
+      const isJSON = (r.headers.get("content-type")||"").includes("application/json");
+      const body = isJSON ? await r.json() : await r.text();
+      if (!r.ok) {
+        const msg = isJSON && body && body.error ? body.error : `HTTP ${r.status}`;
+        throw new Error(msg);
+      }
+      return body;
+    }
+
+    const routes = {
+      "/dashboard": () => showView("view-dashboard"),
+      "/patients/new": () => showView("view-patient-new"),
+      "/campaigns/new": () => showView("view-campaign-new"),
+    };
+
+    function showView(id) {
+      $$(".view").forEach(v => v.style.display = "none");
+      $("#" + id).style.display = "block";
+      $$("#nav a").forEach(a => {
+        a.classList.toggle("active", location.hash.replace(/^#/, "") === a.getAttribute("href").replace(/^#/, ""));
+      });
+    }
+
+    function navigate(path) {
+      location.hash = "#/" + path.replace(/^\/+/, "");
+    }
+
+    window.addEventListener("hashchange", handleRoute);
+    function handleRoute() {
+      const h = location.hash.replace(/^#/, "");
+      const path = h.startsWith("/") ? h : "/dashboard";
+      (routes[path] || routes["/dashboard"])();
+      if (path === "/dashboard") {
+        loadStats();
+        loadRecent();
+      }
+    }
+
+    async function loadStats() {
+      try {
+        const s = await getJSON("/admin/api/stats");
+        $("#kpi-patients").textContent = s.patients ?? "0";
+        $("#kpi-reminders").textContent = s.reminders ?? "0";
+        $("#kpi-responses").textContent = s.responses ?? "0";
+        $("#kpi-campaigns").textContent = s.wa_campaigns ?? "0";
+        $("#kpi-patients-sub").textContent = "ok";
+      } catch (e) {
+        $("#kpi-patients-sub").textContent = "erro ao carregar";
+        toast("Falha ao carregar KPIs: " + e.message, "err");
+      }
+    }
+
+    function card(title, items) {
+      const el = document.createElement("div");
+      el.className = "card";
+      const html = [
+        `<h3>${title}</h3>`,
+        ...(items && items.length ? items.map(renderItem) : ['<div class="muted">Sem itens recentes.</div>'])
+      ].join("");
+      el.innerHTML = html;
+      return el;
+    }
+
+    function renderItem(x) {
+      const id = x.id || x.phone_e164 || "—";
+      const name = x.name || x.title || x.phone_e164 || "(sem nome)";
+      const created = x.created_at ? new Date(x.created_at).toLocaleString() : "";
+      let extra = "";
+      if (x.phone_e164) extra += `<span class="tag">${x.phone_e164}</span> `;
+      if (x.tags) extra += `<span class="tag">${x.tags}</span>`;
+      return `<div class="list-item">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+          <div>
+            <div style="font-weight:600">${name}</div>
+            <div class="muted" style="font-size:12px">#${id} ${created ? " • " + created : ""}</div>
+          </div>
+          <div>${extra}</div>
+        </div>
+      </div>`;
+    }
+
+    async function loadRecent() {
+      try {
+        const r = await getJSON("/admin/api/dashboard/recent");
+        const grid = $("#recent-cards");
+        grid.innerHTML = "";
+        grid.appendChild(card("Pacientes recentes", r.patients || []));
+        grid.appendChild(card("Lembretes recentes", r.reminders || []));
+        grid.appendChild(card("Respostas recentes", r.responses || []));
+        grid.appendChild(card("Medicações recentes", r.medications || []));
+        grid.appendChild(card("Campanhas recentes", r.campaigns || []));
+      } catch (e) {
+        toast("Falha ao carregar recentes: " + e.message, "err");
+      }
+    }
+
+    $("#form-new-patient").addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      const fd = new FormData(ev.currentTarget);
+      const payload = {
+        name: (fd.get("name") || "").trim(),
+        phone_e164: (fd.get("phone_e164") || "").trim(),
+        tags: (fd.get("tags") || "").trim()
+      };
+      if (!payload.name || !payload.phone_e164) {
+        toast("Preencha nome e telefone.", "warn");
+        return;
+      }
+      try {
+        const res = await postJSON("/admin/api/patients", payload);
+        toast("Paciente cadastrado com sucesso.");
+        ev.currentTarget.reset();
+        navigate("/dashboard");
+        loadStats(); loadRecent();
+      } catch (e) {
+        toast("Erro ao cadastrar: " + e.message, "err");
+      }
+    });
+
+    $("#btn-cancel-new").addEventListener("click", () => navigate("/dashboard"));
+
+    (async function boot(){
+      try {
+        const health = await getJSON("/health");
+        $("#env-info").textContent = `DB: ${health.database} • Admin: ${health.admin_enabled ? "on" : "off"}`;
+      } catch(_) {}
+
+      $$("#nav a").forEach(a => {
+        a.addEventListener("click", (ev) => {
+          ev.preventDefault();
+          const route = a.getAttribute("data-route");
+          navigate(route);
+        });
+      });
+
+      if (!location.hash) navigate("/dashboard");
+      handleRoute();
+    })();
+  </script>
+</body>
+</html>
