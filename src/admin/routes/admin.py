@@ -1,844 +1,271 @@
-import os
+# src/admin/routes/admin.py
 import logging
-from datetime import datetime, timedelta
-from functools import wraps
-from flask import Blueprint, request, jsonify, render_template, redirect, url_for, flash, session
-from sqlalchemy import desc, func
-from src.admin.models.campaign import WACampaign, WACampaignRecipient, WACampaignRun
-from src.admin.models.patient import AdminPatient
-from src.admin.services.campaign_service import CampaignService
-from src.admin.services.whatsapp_service import AdminWhatsAppService
+from datetime import datetime
+from typing import List, Dict, Any
+
+from flask import Blueprint, render_template, jsonify
+from sqlalchemy import text, inspect
+
 from src.models.user import db
 
 logger = logging.getLogger(__name__)
 
-admin_bp = Blueprint('admin', __name__, url_prefix='/admin', template_folder='../templates')
+# O template_folder aponta para ../templates relativo a este arquivo
+admin_bp = Blueprint(
+    "admin",
+    __name__,
+    url_prefix="/admin",
+    template_folder="../templates",
+    static_folder="../static",
+)
 
-# Configuração
-ADMIN_TOKEN = os.getenv('ADMIN_UI_TOKEN', '').strip()
-
-def require_auth(f):
-    """Decorator para exigir autenticação admin"""
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        # Verificar token no header
-        token = request.headers.get('X-Admin-Token', '').strip()
-        
-        # Verificar token na sessão (para páginas web)
-        if not token:
-            token = session.get('admin_token', '').strip()
-        
-        # Verificar token nos cookies
-        if not token:
-            token = request.cookies.get('admin_token', '').strip()
-        
-        if not ADMIN_TOKEN:
-            return jsonify({'error': 'Admin token not configured'}), 500
-            
-        if not token or token != ADMIN_TOKEN:
-            if request.is_json or request.path.startswith('/admin/api/'):
-                return jsonify({'error': 'Unauthorized'}), 401
-            else:
-                return redirect(url_for('admin.login'))
-        
-        return f(*args, **kwargs)
-    return decorated_function
-
-# Páginas Web
-@admin_bp.route('/login', methods=['GET', 'POST'])
-def login():
-    """Página de login"""
-    if request.method == 'POST':
-        token = request.form.get('token', '').strip()
-        
-        if not ADMIN_TOKEN:
-            flash('Sistema não configurado', 'error')
-            return render_template('login.html')
-        
-        if token == ADMIN_TOKEN:
-            session['admin_token'] = token
-            flash('Login realizado com sucesso', 'success')
-            return redirect(url_for('admin.dashboard'))
-        else:
-            flash('Token inválido', 'error')
-    
-    return render_template('login.html')
-
-@admin_bp.route('/logout')
-def logout():
-    """Logout"""
-    session.pop('admin_token', None)
-    flash('Logout realizado com sucesso', 'success')
-    return redirect(url_for('admin.login'))
-
-@admin_bp.route('/')
-@require_auth
-def dashboard():
-    """Dashboard principal"""
-    return render_template('dashboard.html')
-
-@admin_bp.route('/campaigns')
-@require_auth
-def campaigns():
-    """Lista de campanhas"""
-    return render_template('campaigns.html')
-
-@admin_bp.route('/campaigns/new')
-@require_auth
-def new_campaign():
-    """Nova campanha"""
-    return render_template('campaign_form.html')
-
-@admin_bp.route('/campaigns/<campaign_id>')
-@require_auth
-def campaign_detail(campaign_id):
-    """Detalhes da campanha"""
-    return render_template('campaign_detail.html', campaign_id=campaign_id)
-
-@admin_bp.route('/patients')
-@require_auth
-def patients():
-    """Lista de pacientes"""
-    return render_template('patients.html')
-
-@admin_bp.route('/patients/new')
-@require_auth
-def new_patient():
-    """Novo paciente"""
-    return render_template('patient_form.html')
-
-@admin_bp.route('/logs')
-@require_auth
-def logs():
-    """Logs do sistema"""
-    return render_template('logs.html')
-
-@admin_bp.route('/health')
-@require_auth
-def health():
-    """Health check"""
-    return render_template('health.html')
-
-@admin_bp.route('/settings')
-@require_auth
-def settings():
-    """Configurações"""
-    return render_template('settings.html')
-
-# API Endpoints
-@admin_bp.route('/api/stats')
-@require_auth
-def api_stats():
-    """Estatísticas básicas para sidebar"""
+# ----------------------------
+# Helpers seguros (não quebram se a tabela não existir)
+# ----------------------------
+def _tables() -> List[str]:
+    """Lista nomes de tabelas existentes no DB."""
     try:
-        campaigns_count = WACampaign.query.count()
-        patients_count = AdminPatient.query.filter_by(active=True).count()
-        
-        return jsonify({
-            'success': True,
-            'campaigns_count': campaigns_count,
-            'patients_count': patients_count
-        })
+        return inspect(db.engine).get_table_names()
+    except Exception as e:
+        logger.warning(f"Inspector failed: {e}")
+        return []
+
+def _first_existing(candidates: List[str]) -> str | None:
+    """Retorna o primeiro nome de tabela que existir dentre os candidatos."""
+    existing = set(_tables())
+    for name in candidates:
+        if name in existing:
+            return name
+    return None
+
+def _safe_count(table_candidates: List[str]) -> int:
+    """COUNT(*) robusto: retorna 0 se a(s) tabela(s) não existir(em)."""
+    table = _first_existing(table_candidates)
+    if not table:
+        return 0
+    try:
+        sql = text(f"SELECT COUNT(*) AS c FROM {table}")
+        row = db.session.execute(sql).first()
+        return int(row[0]) if row else 0
+    except Exception as e:
+        logger.warning(f"count({table}) failed: {e}")
+        return 0
+
+def _safe_recent_campaign_runs(limit: int = 5) -> List[Dict[str, Any]]:
+    """Últimas execuções de campanhas, se a tabela existir."""
+    table = _first_existing(["wa_campaign_runs"])
+    if not table:
+        return []
+    try:
+        sql = text(
+            f"""
+            SELECT id, campaign_id, run_at, phone_e164, status, error_message
+            FROM {table}
+            ORDER BY run_at DESC
+            LIMIT :lim
+            """
+        )
+        rows = db.session.execute(sql, {"lim": limit}).mappings().all()
+        out = []
+        for r in rows:
+            out.append(
+                {
+                    "id": r.get("id"),
+                    "campaign_id": str(r.get("campaign_id")) if r.get("campaign_id") else None,
+                    "run_at": r.get("run_at").isoformat() if r.get("run_at") else None,
+                    "phone_e164": r.get("phone_e164"),
+                    "status": r.get("status"),
+                    "error_message": r.get("error_message"),
+                }
+            )
+        return out
+    except Exception as e:
+        logger.warning(f"recent campaign runs failed: {e}")
+        return []
+
+def _safe_recent_patients(limit: int = 5) -> List[Dict[str, Any]]:
+    """Alguns pacientes recentes, tentando ambos esquemas ('patients' e 'patient')."""
+    table = _first_existing(["patients", "patient"])
+    if not table:
+        return []
+    cols_candidates = [
+        # esquema mais novo
+        ("id", "name", "phone_e164", "active", "created_at"),
+        # esquema alternativo antigo
+        ("id", "name", "whatsapp_phone", "is_active", "created_at"),
+    ]
+    try:
+        # Descobrir colunas disponíveis nesta tabela
+        insp = inspect(db.engine)
+        colnames = {c["name"] for c in insp.get_columns(table)}
+        cols = None
+        mapping = None
+        for cand in cols_candidates:
+            if set(cand).issubset(colnames):
+                cols = cand
+                # mapeia nomes para saída comum
+                if cand == ("id", "name", "phone_e164", "active", "created_at"):
+                    mapping = {"id": "id", "name": "name", "phone": "phone_e164", "active": "active", "created_at": "created_at"}
+                else:
+                    mapping = {"id": "id", "name": "name", "phone": "whatsapp_phone", "active": "is_active", "created_at": "created_at"}
+                break
+        if not cols:
+            return []
+
+        sql = text(
+            f"""
+            SELECT {", ".join(cols)}
+            FROM {table}
+            ORDER BY created_at DESC
+            LIMIT :lim
+            """
+        )
+        rows = db.session.execute(sql, {"lim": limit}).mappings().all()
+        out = []
+        for r in rows:
+            out.append(
+                {
+                    "id": r.get(mapping["id"]),
+                    "name": r.get(mapping["name"]),
+                    "phone": r.get(mapping["phone"]),
+                    "active": r.get(mapping["active"]),
+                    "created_at": r.get(mapping["created_at"]).isoformat() if r.get(mapping["created_at"]) else None,
+                }
+            )
+        return out
+    except Exception as e:
+        logger.warning(f"recent patients failed: {e}")
+        return []
+
+# ----------------------------
+# Rotas de UI
+# ----------------------------
+@admin_bp.route("/", strict_slashes=False)
+def admin_index():
+    """
+    Tenta renderizar o template principal do Admin.
+    Se o template não existir, retorna um JSON com dica.
+    """
+    try:
+        # Tente estes nomes (ajuste aqui se o seu template tiver outro nome)
+        for tpl in ("index.html", "admin.html", "dashboard.html"):
+            try:
+                return render_template(tpl)
+            except Exception:
+                continue
+        # Se nenhum template rendeu, informe com JSON (sem derrubar o Admin)
+        return jsonify(
+            {
+                "ok": False,
+                "error": "Admin UI not loaded",
+                "hint": "verifique templates em src/admin/templates (ex.: index.html)",
+            }
+        ), 503
+    except Exception as e:
+        logger.error(f"Admin index failed: {e}")
+        return jsonify({"ok": False, "error": "Admin UI fatal error"}), 500
+
+# ----------------------------
+# APIs usadas pelo painel
+# ----------------------------
+@admin_bp.route("/api/health", methods=["GET"])
+def admin_health():
+    """Saúde básica do Admin + DB ping."""
+    try:
+        db.session.execute(text("SELECT 1"))
+        db_ok = True
+    except Exception as e:
+        logger.warning(f"DB ping failed: {e}")
+        db_ok = False
+
+    return jsonify(
+        {
+            "ok": True,
+            "service": "admin-ui",
+            "db": "up" if db_ok else "down",
+            "time": datetime.utcnow().isoformat() + "Z",
+        }
+    )
+
+@admin_bp.route("/api/stats", methods=["GET"])
+def admin_stats():
+    """
+    Estatísticas compactas (alguns frontends antigos chamam este endpoint).
+    """
+    try:
+        total_patients = _safe_count(["patients", "patient"])
+        total_campaigns = _safe_count(["wa_campaigns"])
+        total_runs = _safe_count(["wa_campaign_runs"])
+        return jsonify(
+            {
+                "ok": True,
+                "stats": {
+                    "patients": total_patients,
+                    "campaigns": total_campaigns,
+                    "campaign_runs": total_runs,
+                },
+            }
+        )
     except Exception as e:
         logger.error(f"Error getting stats: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({"ok": False, "error": "stats failed"}), 500
 
-@admin_bp.route('/api/dashboard/stats')
-@require_auth
-def api_dashboard_stats():
-    """Estatísticas detalhadas do dashboard"""
+@admin_bp.route("/api/dashboard/stats", methods=["GET"])
+def dashboard_stats():
+    """
+    Versão “dashboard” das estatísticas (alguns UIs usam este caminho).
+    """
     try:
-        # Contadores básicos
-        total_campaigns = WACampaign.query.count()
-        active_campaigns = WACampaign.query.filter_by(status='active').count()
-        total_patients = AdminPatient.query.count()
-        active_patients = AdminPatient.query.filter_by(active=True).count()
-        
-        # Mensagens hoje
-        today = datetime.utcnow().date()
-        today_start = datetime.combine(today, datetime.min.time())
-        today_end = datetime.combine(today, datetime.max.time())
-        
-        messages_today = WACampaignRun.query.filter(
-            WACampaignRun.run_at >= today_start,
-            WACampaignRun.run_at <= today_end
-        ).count()
-        
-        # Taxa de sucesso hoje
-        success_today = WACampaignRun.query.filter(
-            WACampaignRun.run_at >= today_start,
-            WACampaignRun.run_at <= today_end,
-            WACampaignRun.status == 'ok'
-        ).count()
-        
-        success_rate = round((success_today / messages_today * 100) if messages_today > 0 else 0, 1)
-        
-        # Próxima execução
-        campaign_service = CampaignService()
-        next_execution = None
-        next_campaign = None
-        
-        active_campaigns_list = WACampaign.query.filter_by(status='active').all()
-        earliest_execution = None
-        earliest_campaign = None
-        
-        for campaign in active_campaigns_list:
-            executions = campaign_service.get_next_executions(campaign, limit=1)
-            if executions:
-                if not earliest_execution or executions[0] < earliest_execution:
-                    earliest_execution = executions[0]
-                    earliest_campaign = campaign.name
-        
-        if earliest_execution:
-            next_execution = earliest_execution.strftime('%d/%m %H:%M')
-            next_campaign = earliest_campaign
-        
-        return jsonify({
-            'success': True,
-            'stats': {
-                'total_campaigns': total_campaigns,
-                'active_campaigns': active_campaigns,
-                'total_patients': total_patients,
-                'active_patients': active_patients,
-                'messages_today': messages_today,
-                'success_rate': success_rate,
-                'next_execution': next_execution,
-                'next_campaign': next_campaign
+        total_patients = _safe_count(["patients", "patient"])
+        active_patients = 0
+        # tenta contar ativos se existir a coluna correspondente
+        table = _first_existing(["patients", "patient"])
+        if table:
+            try:
+                # tenta variantes de coluna de ativo
+                for col in ("active", "is_active"):
+                    try:
+                        sql = text(f"SELECT COUNT(*) FROM {table} WHERE {col}=1")
+                        active_patients = db.session.execute(sql).scalar() or 0
+                        break
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+
+        total_campaigns = _safe_count(["wa_campaigns"])
+        total_runs = _safe_count(["wa_campaign_runs"])
+
+        return jsonify(
+            {
+                "ok": True,
+                "stats": {
+                    "patients_total": total_patients,
+                    "patients_active": active_patients,
+                    "wa_campaigns": total_campaigns,
+                    "wa_campaign_runs": total_runs,
+                },
             }
-        })
-        
+        )
     except Exception as e:
         logger.error(f"Error getting dashboard stats: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({"ok": False, "error": "dashboard stats failed"}), 500
 
-@admin_bp.route('/api/dashboard/recent')
-@require_auth
-def api_dashboard_recent():
-    """Atividade recente para dashboard"""
+@admin_bp.route("/api/dashboard/recent", methods=["GET"])
+def dashboard_recent():
+    """
+    Itens recentes para cards do painel.
+    """
     try:
-        # Campanhas recentes
-        recent_campaigns = WACampaign.query.order_by(desc(WACampaign.created_at)).limit(5).all()
-        
-        # Execuções recentes
-        recent_runs = db.session.query(
-            WACampaignRun,
-            WACampaign.name.label('campaign_name')
-        ).join(WACampaign).order_by(desc(WACampaignRun.run_at)).limit(10).all()
-        
-        # Formatar dados
-        campaigns_data = []
-        for campaign in recent_campaigns:
-            campaigns_data.append({
-                'id': str(campaign.id),
-                'name': campaign.name,
-                'template_name': campaign.template_name,
-                'frequency': campaign.frequency,
-                'status': campaign.status
-            })
-        
-        runs_data = []
-        for run, campaign_name in recent_runs:
-            # Mascarar telefone
-            phone_masked = f"****{run.phone_e164[-4:]}" if len(run.phone_e164) >= 4 else "****"
-            
-            runs_data.append({
-                'id': run.id,
-                'campaign_name': campaign_name,
-                'phone_masked': phone_masked,
-                'run_at': run.run_at.isoformat() if run.run_at else None,
-                'status': run.status
-            })
-        
-        return jsonify({
-            'success': True,
-            'recent_campaigns': campaigns_data,
-            'recent_runs': runs_data
-        })
-        
+        return jsonify(
+            {
+                "ok": True,
+                "recent": {
+                    "patients": _safe_recent_patients(limit=5),
+                    "campaign_runs": _safe_recent_campaign_runs(limit=5),
+                },
+            }
+        )
     except Exception as e:
         logger.error(f"Error getting recent activity: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@admin_bp.route('/api/test-template', methods=['POST'])
-@require_auth
-def api_test_template():
-    """Testar envio de template"""
-    try:
-        # Número do admin
-        admin_phone = os.getenv('ADMIN_PHONE_NUMBER', '5514997799022').strip()
-        if admin_phone.startswith('+'):
-            admin_phone = admin_phone[1:]
-        
-        # Serviço WhatsApp
-        whatsapp_service = AdminWhatsAppService()
-        
-        if not whatsapp_service.validate_credentials():
-            return jsonify({
-                'success': False,
-                'error': 'WhatsApp credentials not configured'
-            }), 500
-        
-        # Enviar template de teste
-        result = whatsapp_service.send_template(
-            phone_e164=admin_phone,
-            template_name='uetg_paciente_agenda_ptbr',
-            lang_code='pt_BR',
-            params={
-                '1': 'Admin',
-                '2': datetime.now().strftime('%d/%m/%Y')
-            }
-        )
-        
-        if result['success']:
-            logger.info(f"Test template sent successfully to admin")
-            return jsonify({
-                'success': True,
-                'message': 'Template de teste enviado com sucesso',
-                'message_id': result.get('message_id')
-            })
-        else:
-            logger.error(f"Test template failed: {result.get('error')}")
-            return jsonify({
-                'success': False,
-                'error': result.get('error', 'Erro desconhecido')
-            }), 400
-            
-    except Exception as e:
-        logger.error(f"Error testing template: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@admin_bp.route('/api/campaigns', methods=['GET'])
-@require_auth
-def api_campaigns_list():
-    """Listar campanhas"""
-    try:
-        page = request.args.get('page', 1, type=int)
-        per_page = request.args.get('per_page', 20, type=int)
-        
-        campaigns = WACampaign.query.order_by(desc(WACampaign.created_at)).paginate(
-            page=page, per_page=per_page, error_out=False
-        )
-        
-        campaigns_data = []
-        campaign_service = CampaignService()
-        
-        for campaign in campaigns.items:
-            # Próximas execuções
-            next_executions = campaign_service.get_next_executions(campaign, limit=3)
-            next_executions_formatted = [
-                exec_dt.strftime('%d/%m/%Y %H:%M') for exec_dt in next_executions
-            ]
-            
-            # Contadores
-            total_recipients = WACampaignRecipient.query.filter_by(campaign_id=campaign.id).count()
-            total_runs = WACampaignRun.query.filter_by(campaign_id=campaign.id).count()
-            success_runs = WACampaignRun.query.filter_by(campaign_id=campaign.id, status='ok').count()
-            
-            campaigns_data.append({
-                **campaign.to_dict(),
-                'total_recipients': total_recipients,
-                'total_runs': total_runs,
-                'success_runs': success_runs,
-                'next_executions': next_executions_formatted
-            })
-        
-        return jsonify({
-            'success': True,
-            'campaigns': campaigns_data,
-            'pagination': {
-                'page': campaigns.page,
-                'pages': campaigns.pages,
-                'per_page': campaigns.per_page,
-                'total': campaigns.total,
-                'has_next': campaigns.has_next,
-                'has_prev': campaigns.has_prev
-            }
-        })
-        
-    except Exception as e:
-        logger.error(f"Error listing campaigns: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@admin_bp.route('/api/campaigns', methods=['POST'])
-@require_auth
-def api_campaigns_create():
-    """Criar nova campanha"""
-    try:
-        data = request.get_json()
-        
-        # Validações básicas
-        required_fields = ['name', 'template_name', 'frequency', 'start_at', 'send_time']
-        for field in required_fields:
-            if not data.get(field):
-                return jsonify({'success': False, 'error': f'Campo {field} é obrigatório'}), 400
-        
-        # Criar campanha
-        campaign = WACampaign(
-            name=data['name'],
-            template_name=data['template_name'],
-            lang_code=data.get('lang_code', 'pt_BR'),
-            params_mode=data.get('params_mode', 'fixed'),
-            fixed_params=data.get('fixed_params'),
-            tz=data.get('tz', 'America/Sao_Paulo'),
-            start_at=datetime.fromisoformat(data['start_at'].replace('Z', '+00:00')),
-            end_at=datetime.fromisoformat(data['end_at'].replace('Z', '+00:00')) if data.get('end_at') else None,
-            frequency=data['frequency'],
-            days_of_week=data.get('days_of_week'),
-            day_of_month=data.get('day_of_month'),
-            send_time=datetime.strptime(data['send_time'], '%H:%M').time(),
-            cron_expr=data.get('cron_expr'),
-            status='active'
-        )
-        
-        db.session.add(campaign)
-        db.session.flush()  # Para obter o ID
-        
-        # Adicionar destinatários
-        recipients = data.get('recipients', [])
-        for recipient_data in recipients:
-            if isinstance(recipient_data, str):
-                # Formato simples: apenas telefone
-                phone = recipient_data.strip()
-                if phone.startswith('+'):
-                    phone = phone[1:]
-                
-                recipient = WACampaignRecipient(
-                    campaign_id=campaign.id,
-                    phone_e164=phone
-                )
-            else:
-                # Formato completo: telefone + parâmetros
-                phone = recipient_data.get('phone', '').strip()
-                if phone.startswith('+'):
-                    phone = phone[1:]
-                
-                recipient = WACampaignRecipient(
-                    campaign_id=campaign.id,
-                    phone_e164=phone,
-                    per_params=recipient_data.get('params')
-                )
-            
-            db.session.add(recipient)
-        
-        db.session.commit()
-        
-        logger.info(f"Campaign created: {campaign.name} (ID: {campaign.id})")
-        
-        return jsonify({
-            'success': True,
-            'campaign': campaign.to_dict(),
-            'message': 'Campanha criada com sucesso'
-        })
-        
-    except Exception as e:
-        db.session.rollback()
-        logger.error(f"Error creating campaign: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@admin_bp.route('/api/campaigns/<campaign_id>/pause', methods=['POST'])
-@require_auth
-def api_campaign_pause(campaign_id):
-    """Pausar campanha"""
-    try:
-        campaign = WACampaign.query.get_or_404(campaign_id)
-        campaign.status = 'paused'
-        db.session.commit()
-        
-        logger.info(f"Campaign paused: {campaign.name} (ID: {campaign.id})")
-        
-        return jsonify({
-            'success': True,
-            'message': 'Campanha pausada com sucesso'
-        })
-        
-    except Exception as e:
-        db.session.rollback()
-        logger.error(f"Error pausing campaign {campaign_id}: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@admin_bp.route('/api/campaigns/<campaign_id>/resume', methods=['POST'])
-@require_auth
-def api_campaign_resume(campaign_id):
-    """Retomar campanha"""
-    try:
-        campaign = WACampaign.query.get_or_404(campaign_id)
-        campaign.status = 'active'
-        db.session.commit()
-        
-        logger.info(f"Campaign resumed: {campaign.name} (ID: {campaign.id})")
-        
-        return jsonify({
-            'success': True,
-            'message': 'Campanha retomada com sucesso'
-        })
-        
-    except Exception as e:
-        db.session.rollback()
-        logger.error(f"Error resuming campaign {campaign_id}: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@admin_bp.route('/api/campaigns/<campaign_id>/test', methods=['POST'])
-@require_auth
-def api_campaign_test(campaign_id):
-    """Testar campanha (enviar para admin)"""
-    try:
-        campaign = WACampaign.query.get_or_404(campaign_id)
-        
-        # Número do admin
-        admin_phone = os.getenv('ADMIN_PHONE_NUMBER', '5514997799022').strip()
-        if admin_phone.startswith('+'):
-            admin_phone = admin_phone[1:]
-        
-        # Serviço WhatsApp
-        whatsapp_service = AdminWhatsAppService()
-        
-        # Montar parâmetros
-        params = {}
-        if campaign.params_mode == 'fixed' and campaign.fixed_params:
-            params = campaign.fixed_params.copy()
-        
-        # Parâmetros padrão para teste
-        if not params:
-            params = {
-                '1': 'Admin Teste',
-                '2': datetime.now().strftime('%d/%m/%Y')
-            }
-        
-        # Enviar
-        result = whatsapp_service.send_template(
-            phone_e164=admin_phone,
-            template_name=campaign.template_name,
-            lang_code=campaign.lang_code,
-            params=params
-        )
-        
-        if result['success']:
-            logger.info(f"Test campaign sent: {campaign.name} to admin")
-            return jsonify({
-                'success': True,
-                'message': 'Teste da campanha enviado com sucesso',
-                'message_id': result.get('message_id')
-            })
-        else:
-            logger.error(f"Test campaign failed: {result.get('error')}")
-            return jsonify({
-                'success': False,
-                'error': result.get('error', 'Erro desconhecido')
-            }), 400
-            
-    except Exception as e:
-        logger.error(f"Error testing campaign {campaign_id}: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-# API Endpoints para Pacientes
-@admin_bp.route('/api/patients', methods=['GET'])
-@require_auth
-def api_patients_list():
-    """Listar pacientes"""
-    try:
-        page = request.args.get('page', 1, type=int)
-        per_page = request.args.get('per_page', 20, type=int)
-        
-        patients = AdminPatient.query.order_by(desc(AdminPatient.created_at)).paginate(
-            page=page, per_page=per_page, error_out=False
-        )
-        
-        patients_data = []
-        for patient in patients.items:
-            patients_data.append({
-                'id': str(patient.id),
-                'name': patient.name,
-                'phone_e164': f"****{patient.phone_e164[-4:]}" if len(patient.phone_e164) >= 4 else "****",
-                'phone_full': patient.phone_e164,  # Para edição
-                'active': patient.active,
-                'created_at': patient.created_at.isoformat() if patient.created_at else None,
-                'protocols': patient.protocols or {}
-            })
-        
-        return jsonify({
-            'success': True,
-            'patients': patients_data,
-            'pagination': {
-                'page': patients.page,
-                'pages': patients.pages,
-                'per_page': patients.per_page,
-                'total': patients.total,
-                'has_next': patients.has_next,
-                'has_prev': patients.has_prev
-            }
-        })
-        
-    except Exception as e:
-        logger.error(f"Error listing patients: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@admin_bp.route('/api/patients', methods=['POST'])
-@require_auth
-def api_patients_create():
-    """Criar novo paciente"""
-    try:
-        data = request.get_json()
-        
-        # Validações básicas
-        name = data.get('name', '').strip()
-        phone = data.get('phone', '').strip()
-        
-        if not name or not phone:
-            return jsonify({'success': False, 'error': 'Nome e telefone são obrigatórios'}), 400
-        
-        # Limpar e formatar telefone
-        phone_clean = ''.join(filter(str.isdigit, phone))
-        if len(phone_clean) < 10:
-            return jsonify({'success': False, 'error': 'Telefone inválido'}), 400
-        
-        # Formatear telefone brasileiro
-        if phone_clean.startswith('55'):
-            phone_formatted = phone_clean
-        elif phone_clean.startswith('14'):
-            phone_formatted = f"55{phone_clean}"
-        else:
-            phone_formatted = f"55{phone_clean}"
-        
-        # Verificar se já existe
-        existing_patient = AdminPatient.query.filter_by(phone_e164=phone_formatted).first()
-        if existing_patient:
-            return jsonify({'success': False, 'error': 'Paciente com este telefone já existe'}), 400
-        
-        # Criar paciente
-        patient = AdminPatient(
-            name=name,
-            phone_e164=phone_formatted,
-            email=data.get('email', '').strip() or None,
-            birth_date=datetime.strptime(data['birth_date'], '%Y-%m-%d').date() if data.get('birth_date') else None,
-            gender=data.get('gender') or None,
-            protocols=data.get('protocols', {}),
-            priority=data.get('priority', 'normal'),
-            notes=data.get('notes', '').strip() or None,
-            active=data.get('active', True)
-        )
-        
-        db.session.add(patient)
-        db.session.commit()
-        
-        logger.info(f"Patient created: {name} (ID: {patient.id}, Phone: ****{phone_formatted[-4:]})")
-        
-        return jsonify({
-            'success': True,
-            'patient': {
-                'id': str(patient.id),
-                'name': patient.name,
-                'phone_masked': f"****{phone_formatted[-4:]}",
-                'active': patient.active
-            },
-            'message': f'Paciente {name} cadastrado com sucesso'
-        }), 201
-        
-    except Exception as e:
-        db.session.rollback()
-        logger.error(f"Error creating patient: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@admin_bp.route('/api/patients/<patient_id>', methods=['GET'])
-@require_auth
-def api_patient_detail(patient_id):
-    """Detalhes do paciente"""
-    try:
-        patient = AdminPatient.query.get_or_404(patient_id)
-        
-        return jsonify({
-            'success': True,
-            'patient': {
-                'id': str(patient.id),
-                'name': patient.name,
-                'phone_e164': patient.phone_e164,
-                'email': patient.email,
-                'birth_date': patient.birth_date.isoformat() if patient.birth_date else None,
-                'gender': patient.gender,
-                'protocols': patient.protocols or {},
-                'priority': patient.priority,
-                'notes': patient.notes,
-                'active': patient.active,
-                'created_at': patient.created_at.isoformat() if patient.created_at else None
-            }
-        })
-        
-    except Exception as e:
-        logger.error(f"Error getting patient {patient_id}: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@admin_bp.route('/api/patients/<patient_id>', methods=['PUT'])
-@require_auth
-def api_patient_update(patient_id):
-    """Atualizar paciente"""
-    try:
-        patient = AdminPatient.query.get_or_404(patient_id)
-        data = request.get_json()
-        
-        # Atualizar campos
-        if 'name' in data:
-            patient.name = data['name'].strip()
-        
-        if 'phone' in data:
-            phone_clean = ''.join(filter(str.isdigit, data['phone']))
-            if len(phone_clean) >= 10:
-                if phone_clean.startswith('55'):
-                    patient.phone_e164 = phone_clean
-                elif phone_clean.startswith('14'):
-                    patient.phone_e164 = f"55{phone_clean}"
-                else:
-                    patient.phone_e164 = f"55{phone_clean}"
-        
-        if 'email' in data:
-            patient.email = data['email'].strip() or None
-            
-        if 'birth_date' in data and data['birth_date']:
-            patient.birth_date = datetime.strptime(data['birth_date'], '%Y-%m-%d').date()
-            
-        if 'gender' in data:
-            patient.gender = data['gender'] or None
-            
-        if 'protocols' in data:
-            patient.protocols = data['protocols']
-            
-        if 'priority' in data:
-            patient.priority = data['priority']
-            
-        if 'notes' in data:
-            patient.notes = data['notes'].strip() or None
-            
-        if 'active' in data:
-            patient.active = data['active']
-        
-        db.session.commit()
-        
-        logger.info(f"Patient updated: {patient.name} (ID: {patient.id})")
-        
-        return jsonify({
-            'success': True,
-            'message': 'Paciente atualizado com sucesso'
-        })
-        
-    except Exception as e:
-        db.session.rollback()
-        logger.error(f"Error updating patient {patient_id}: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@admin_bp.route('/api/patients/<patient_id>/toggle', methods=['POST'])
-@require_auth
-def api_patient_toggle(patient_id):
-    """Ativar/desativar paciente"""
-    try:
-        patient = AdminPatient.query.get_or_404(patient_id)
-        patient.active = not patient.active
-        db.session.commit()
-        
-        status = "ativado" if patient.active else "desativado"
-        logger.info(f"Patient {status}: {patient.name} (ID: {patient.id})")
-        
-        return jsonify({
-            'success': True,
-            'message': f'Paciente {status} com sucesso',
-            'active': patient.active
-        })
-        
-    except Exception as e:
-        db.session.rollback()
-        logger.error(f"Error toggling patient {patient_id}: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-
-def send_immediate_templates(patient_data):
-    """
-    Envia templates imediatamente após cadastro do paciente
-    """
-    import requests
-    import os
-    from datetime import datetime
-    
-    # Configurações WhatsApp
-    access_token = os.getenv('WHATSAPP_ACCESS_TOKEN')
-    phone_number_id = os.getenv('WHATSAPP_PHONE_NUMBER_ID')
-    
-    if not access_token or not phone_number_id:
-        print("⚠️ Configurações WhatsApp não encontradas")
-        return False
-    
-    patient_phone = patient_data.get('phone', '').replace('(', '').replace(')', '').replace('-', '').replace(' ', '')
-    if not patient_phone.startswith('55'):
-        patient_phone = '55' + patient_phone
-    
-    patient_name = patient_data.get('name', 'Paciente')
-    protocols = patient_data.get('protocols', {})
-    
-    sent_templates = []
-    
-    # Mapear protocolos para templates
-    template_mapping = {
-        'uetg': 'uetg_paciente_agenda_ptbr',
-        'gad7': 'gad7_checkin_ptbr', 
-        'phq9': 'phq9_checkin_ptbr',
-        'asrs18': 'asrs18_checkin_ptbr'
-    }
-    
-    for protocol, config in protocols.items():
-        if config.get('immediate', False):
-            template_name = template_mapping.get(protocol)
-            
-            if template_name:
-                success = send_whatsapp_template(
-                    access_token, 
-                    phone_number_id, 
-                    patient_phone, 
-                    template_name, 
-                    patient_name
-                )
-                
-                if success:
-                    sent_templates.append(protocol.upper())
-                    print(f"✅ Template {protocol.upper()} enviado para {patient_name}")
-                else:
-                    print(f"❌ Falha ao enviar template {protocol.upper()}")
-    
-    return sent_templates
-
-def send_whatsapp_template(access_token, phone_number_id, recipient, template_name, patient_name):
-    """
-    Envia template WhatsApp
-    """
-    url = f"https://graph.facebook.com/v18.0/{phone_number_id}/messages"
-    
-    headers = {
-        'Authorization': f'Bearer {access_token}',
-        'Content-Type': 'application/json'
-    }
-    
-    message_data = {
-        "messaging_product": "whatsapp",
-        "to": recipient,
-        "type": "template",
-        "template": {
-            "name": template_name,
-            "language": {
-                "code": "pt_BR"
-            },
-            "components": [
-                {
-                    "type": "body",
-                    "parameters": [
-                        {
-                            "type": "text",
-                            "text": patient_name
-                        }
-                    ]
-                }
-            ]
-        }
-    }
-    
-    try:
-        response = requests.post(url, headers=headers, json=message_data, timeout=30)
-        return response.status_code == 200
-    except Exception as e:
-        print(f"Erro ao enviar template: {e}")
-        return False
-
+        return jsonify({"ok": False, "error": "recent failed"}), 500
