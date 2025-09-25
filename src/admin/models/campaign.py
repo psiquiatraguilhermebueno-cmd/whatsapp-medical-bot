@@ -6,12 +6,6 @@ from sqlalchemy import Column, Text, Integer, DateTime, CheckConstraint, Foreign
 from sqlalchemy.orm import relationship
 from src.models.user import db
 
-# Observação: usamos tipos portáteis para SQLite.
-# - id como String (UUID armazenado em texto)
-# - JSON como Text (serializado)
-# - days_of_week como Text "1,3,5"
-# - send_time como Text "HH:MM"
-
 def _json_dump(value):
     try:
         return json.dumps(value, ensure_ascii=False)
@@ -31,15 +25,15 @@ class WACampaign(db.Model):
     name = Column(Text, nullable=False)
     template_name = Column(Text, nullable=False)
     lang_code = Column(Text, nullable=False, default='pt_BR')
-    params_mode = Column(Text, nullable=False)  # 'fixed' or 'per_recipient'
-    fixed_params = Column(Text)                 # JSON string
+    params_mode = Column(Text, nullable=False)   # 'fixed' or 'per_recipient'
+    fixed_params = Column(Text)                  # JSON serializado
     tz = Column(Text, nullable=False, default='America/Sao_Paulo')
     start_at = Column(DateTime, nullable=False)
-    end_at = Column(DateTime)                   # NULL = sem fim
-    frequency = Column(Text, nullable=False)    # 'once','daily','weekly','monthly','cron'
-    days_of_week = Column(Text)                 # "1,3,5"
-    day_of_month = Column(Integer)              # 1..31
-    send_time = Column(Text, nullable=False)    # "HH:MM"
+    end_at = Column(DateTime)                    # NULL = sem fim
+    frequency = Column(Text, nullable=False)     # 'once','daily','weekly','monthly','cron'
+    days_of_week = Column(Text)                  # "1,3,5"
+    day_of_month = Column(Integer)               # 1..31
+    send_time = Column(Text, nullable=False)     # "HH:MM"
     cron_expr = Column(Text)
     status = Column(Text, nullable=False, default='active')  # 'active','paused','done'
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
@@ -53,7 +47,6 @@ class WACampaign(db.Model):
         CheckConstraint("status in ('active','paused','done')", name='check_status'),
     )
 
-    # Helpers para fixed_params como dict
     @property
     def fixed_params_obj(self):
         return _json_load(self.fixed_params)
@@ -89,8 +82,8 @@ class WACampaignRecipient(db.Model):
     __tablename__ = 'wa_campaign_recipients'
 
     campaign_id = Column(Text, ForeignKey('wa_campaigns.id', ondelete='CASCADE'), primary_key=True)
-    phone_e164 = Column(Text, nullable=False, primary_key=True)
-    per_params = Column(Text)  # JSON string
+    phone_e164  = Column(Text, nullable=False, primary_key=True)
+    per_params  = Column(Text)  # JSON serializado
 
     campaign = relationship("WACampaign", back_populates="recipients")
 
@@ -115,13 +108,13 @@ class WACampaignRecipient(db.Model):
 class WACampaignRun(db.Model):
     __tablename__ = 'wa_campaign_runs'
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
+    id          = Column(Integer, primary_key=True, autoincrement=True)
     campaign_id = Column(Text, ForeignKey('wa_campaigns.id', ondelete='CASCADE'), nullable=False)
-    run_at = Column(DateTime, nullable=False)
-    phone_e164 = Column(Text, nullable=False)
-    payload = Column(Text)      # JSON string
-    wa_response = Column(Text)  # JSON string
-    status = Column(Text, nullable=False)  # 'ok','error','skipped'
+    run_at      = Column(DateTime, nullable=False)
+    phone_e164  = Column(Text, nullable=False)
+    payload     = Column(Text)   # JSON serializado
+    wa_response = Column(Text)   # JSON serializado
+    status      = Column(Text, nullable=False)   # 'ok','error','skipped'
     error_message = Column(Text)
 
     campaign = relationship("WACampaign", back_populates="runs")
