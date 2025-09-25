@@ -47,7 +47,7 @@ from src.routes.telegram import telegram_bp  # noqa: E402
 from src.routes.scheduler import scheduler_bp  # noqa: E402
 from src.routes.iclinic import iclinic_bp  # noqa: E402
 
-# ⚠️ Desligado por ora (evitar import/DDL opcional derrubando boot)
+# ⚠️ MÓDULOS OPCIONAIS DESLIGADOS (evitar derrubar o boot)
 # from src.routes.medication import medication_bp  # noqa: E402
 # from src.routes.mood import mood_bp  # noqa: E402
 
@@ -62,11 +62,11 @@ from src.jobs.uetg_scheduler import init_scheduler  # noqa: E402
 _MAIN_LOADED = False
 _BOOT_ERROR = None
 
+
 def _load_models_safely():
     """
     Importa MODELOS que participam do create_all(), de forma defensiva.
-    IMPORTANTE: usar o alias Patient de src.models.patient (que aponta para 'patients'),
-    para evitar criar a tabela duas vezes.
+    Importante: sempre usar o alias Patient (tabela 'patients').
     """
     problems = []
 
@@ -92,12 +92,13 @@ def _load_models_safely():
     except Exception as e:
         problems.append(f"breathing_exercise model not loaded: {e}")
 
-    # ⚠️ NÃO importar campanhas nem módulos opcionais aqui.
+    # ⚠️ NÃO importar campanhas, medication ou mood aqui.
     # Eles serão reintroduzidos depois que u-ETG estiver estável.
 
     if problems:
         for p in problems:
             logger.warning(p)
+
 
 def _load_admin_blueprint():
     """Carrega a UI de Admin. Se falhar, deixa um endpoint de diagnóstico em /admin."""
@@ -123,6 +124,7 @@ def _load_admin_blueprint():
                 503,
             )
 
+
 # ---------- Registro dos blueprints de API ----------
 app.register_blueprint(user_bp, url_prefix="/api/users")
 app.register_blueprint(patient_bp, url_prefix="/api/patients")
@@ -140,6 +142,7 @@ app.register_blueprint(admin_patient_bp, url_prefix="/admin/api")
 # app.register_blueprint(medication_bp, url_prefix="/api/medications")
 # app.register_blueprint(mood_bp, url_prefix="/api/moods")
 
+
 # ---------- Rotas básicas ----------
 @app.route("/")
 def index():
@@ -151,6 +154,7 @@ def index():
             "admin_url": "/admin",
         }
     )
+
 
 @app.route("/health")
 def health():
@@ -174,6 +178,7 @@ def health():
             "database": db_status,
         }
     )
+
 
 def _boot_state():
     """/ops/boot-state (sem decorator para evitar conflitos de endpoint)."""
@@ -201,11 +206,13 @@ def _boot_state():
             }
         )
 
+
 def _register_boot_state_route():
     """Registra /ops/boot-state de forma idempotente."""
     endpoint_name = "ops_boot_state"
     if endpoint_name not in app.view_functions:
         app.add_url_rule("/ops/boot-state", endpoint=endpoint_name, view_func=_boot_state)
+
 
 def _init_app():
     """Inicializa modelos, cria tabelas, agenda jobs e carrega Admin."""
@@ -237,6 +244,7 @@ def _init_app():
     finally:
         _register_boot_state_route()
 
+
 # ---------- Entrada ----------
 if __name__ == "__main__":
     db.init_app(app)
@@ -250,6 +258,7 @@ else:
     db.init_app(app)
     with app.app_context():
         _init_app()
+
 
 # Arquivos estáticos
 @app.route("/static/<path:filename>")
