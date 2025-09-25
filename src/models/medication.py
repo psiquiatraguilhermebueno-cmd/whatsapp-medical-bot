@@ -32,3 +32,9 @@ class Medication(db.Model):
             "is_active": self.is_active,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
+
+# --- STUB para compatibilidade legada ---
+# Alguns arquivos antigos podem tentar importar "MedicationConfirmation".
+# Tornamos essa classe ABSTRATA para não criar tabela nem DDL.
+class MedicationConfirmation(db.Model):
+    __abstract__ = True
