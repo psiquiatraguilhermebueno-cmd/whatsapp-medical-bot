@@ -1,271 +1,152 @@
 # src/admin/routes/admin.py
 import logging
-from datetime import datetime
-from typing import List, Dict, Any
-
-from flask import Blueprint, render_template, jsonify
-from sqlalchemy import text, inspect
-
+from flask import Blueprint, render_template, jsonify, redirect
 from src.models.user import db
 
 logger = logging.getLogger(__name__)
 
-# O template_folder aponta para ../templates relativo a este arquivo
-admin_bp = Blueprint(
-    "admin",
-    __name__,
-    url_prefix="/admin",
-    template_folder="../templates",
-    static_folder="../static",
-)
+# Blueprint do Admin. O prefixo /admin é aplicado no main.py
+admin_bp = Blueprint("admin", __name__)
 
-# ----------------------------
-# Helpers seguros (não quebram se a tabela não existir)
-# ----------------------------
-def _tables() -> List[str]:
-    """Lista nomes de tabelas existentes no DB."""
-    try:
-        return inspect(db.engine).get_table_names()
-    except Exception as e:
-        logger.warning(f"Inspector failed: {e}")
-        return []
-
-def _first_existing(candidates: List[str]) -> str | None:
-    """Retorna o primeiro nome de tabela que existir dentre os candidatos."""
-    existing = set(_tables())
-    for name in candidates:
-        if name in existing:
-            return name
-    return None
-
-def _safe_count(table_candidates: List[str]) -> int:
-    """COUNT(*) robusto: retorna 0 se a(s) tabela(s) não existir(em)."""
-    table = _first_existing(table_candidates)
-    if not table:
-        return 0
-    try:
-        sql = text(f"SELECT COUNT(*) AS c FROM {table}")
-        row = db.session.execute(sql).first()
-        return int(row[0]) if row else 0
-    except Exception as e:
-        logger.warning(f"count({table}) failed: {e}")
-        return 0
-
-def _safe_recent_campaign_runs(limit: int = 5) -> List[Dict[str, Any]]:
-    """Últimas execuções de campanhas, se a tabela existir."""
-    table = _first_existing(["wa_campaign_runs"])
-    if not table:
-        return []
-    try:
-        sql = text(
-            f"""
-            SELECT id, campaign_id, run_at, phone_e164, status, error_message
-            FROM {table}
-            ORDER BY run_at DESC
-            LIMIT :lim
-            """
-        )
-        rows = db.session.execute(sql, {"lim": limit}).mappings().all()
-        out = []
-        for r in rows:
-            out.append(
-                {
-                    "id": r.get("id"),
-                    "campaign_id": str(r.get("campaign_id")) if r.get("campaign_id") else None,
-                    "run_at": r.get("run_at").isoformat() if r.get("run_at") else None,
-                    "phone_e164": r.get("phone_e164"),
-                    "status": r.get("status"),
-                    "error_message": r.get("error_message"),
-                }
-            )
-        return out
-    except Exception as e:
-        logger.warning(f"recent campaign runs failed: {e}")
-        return []
-
-def _safe_recent_patients(limit: int = 5) -> List[Dict[str, Any]]:
-    """Alguns pacientes recentes, tentando ambos esquemas ('patients' e 'patient')."""
-    table = _first_existing(["patients", "patient"])
-    if not table:
-        return []
-    cols_candidates = [
-        # esquema mais novo
-        ("id", "name", "phone_e164", "active", "created_at"),
-        # esquema alternativo antigo
-        ("id", "name", "whatsapp_phone", "is_active", "created_at"),
-    ]
-    try:
-        # Descobrir colunas disponíveis nesta tabela
-        insp = inspect(db.engine)
-        colnames = {c["name"] for c in insp.get_columns(table)}
-        cols = None
-        mapping = None
-        for cand in cols_candidates:
-            if set(cand).issubset(colnames):
-                cols = cand
-                # mapeia nomes para saída comum
-                if cand == ("id", "name", "phone_e164", "active", "created_at"):
-                    mapping = {"id": "id", "name": "name", "phone": "phone_e164", "active": "active", "created_at": "created_at"}
-                else:
-                    mapping = {"id": "id", "name": "name", "phone": "whatsapp_phone", "active": "is_active", "created_at": "created_at"}
-                break
-        if not cols:
-            return []
-
-        sql = text(
-            f"""
-            SELECT {", ".join(cols)}
-            FROM {table}
-            ORDER BY created_at DESC
-            LIMIT :lim
-            """
-        )
-        rows = db.session.execute(sql, {"lim": limit}).mappings().all()
-        out = []
-        for r in rows:
-            out.append(
-                {
-                    "id": r.get(mapping["id"]),
-                    "name": r.get(mapping["name"]),
-                    "phone": r.get(mapping["phone"]),
-                    "active": r.get(mapping["active"]),
-                    "created_at": r.get(mapping["created_at"]).isoformat() if r.get(mapping["created_at"]) else None,
-                }
-            )
-        return out
-    except Exception as e:
-        logger.warning(f"recent patients failed: {e}")
-        return []
-
-# ----------------------------
-# Rotas de UI
-# ----------------------------
-@admin_bp.route("/", strict_slashes=False)
-def admin_index():
+# ------------------------
+# Helpers tolerantes a erro
+# ------------------------
+def _model_class(module_name: str, class_name: str):
     """
-    Tenta renderizar o template principal do Admin.
-    Se o template não existir, retorna um JSON com dica.
+    Importa dinamicamente um modelo. Retorna None se falhar.
     """
     try:
-        # Tente estes nomes (ajuste aqui se o seu template tiver outro nome)
-        for tpl in ("index.html", "admin.html", "dashboard.html"):
-            try:
-                return render_template(tpl)
-            except Exception:
-                continue
-        # Se nenhum template rendeu, informe com JSON (sem derrubar o Admin)
-        return jsonify(
-            {
-                "ok": False,
-                "error": "Admin UI not loaded",
-                "hint": "verifique templates em src/admin/templates (ex.: index.html)",
-            }
-        ), 503
+        mod = __import__(f"src.models.{module_name}", fromlist=[class_name])
+        return getattr(mod, class_name, None)
     except Exception as e:
-        logger.error(f"Admin index failed: {e}")
-        return jsonify({"ok": False, "error": "Admin UI fatal error"}), 500
+        logger.warning("Falha ao importar %s.%s: %s", module_name, class_name, e)
+        return None
 
-# ----------------------------
-# APIs usadas pelo painel
-# ----------------------------
-@admin_bp.route("/api/health", methods=["GET"])
-def admin_health():
-    """Saúde básica do Admin + DB ping."""
+
+def _safe_count(module_name: str, class_name: str) -> int:
+    """
+    Faz COUNT(*) com segurança; se falhar, retorna 0.
+    """
+    Model = _model_class(module_name, class_name)
+    if Model is None:
+        return 0
     try:
-        db.session.execute(text("SELECT 1"))
-        db_ok = True
+        return db.session.query(Model).count()
     except Exception as e:
-        logger.warning(f"DB ping failed: {e}")
-        db_ok = False
+        logger.warning("COUNT falhou para %s.%s: %s", module_name, class_name, e)
+        return 0
 
-    return jsonify(
-        {
-            "ok": True,
-            "service": "admin-ui",
-            "db": "up" if db_ok else "down",
-            "time": datetime.utcnow().isoformat() + "Z",
-        }
-    )
 
+def _safe_recent(module_name: str, class_name: str, order_field: str = "created_at", limit: int = 5):
+    """
+    Busca registros recentes com segurança; se falhar, retorna lista vazia.
+    """
+    Model = _model_class(module_name, class_name)
+    if Model is None:
+        return []
+
+    try:
+        col = getattr(Model, order_field, None)
+        q = db.session.query(Model)
+        if col is not None:
+            q = q.order_by(col.desc())
+        rows = q.limit(limit).all()
+        out = []
+        for r in rows:
+            if hasattr(r, "to_dict"):
+                out.append(r.to_dict())
+            else:
+                # fallback mínimo
+                out.append({"id": getattr(r, "id", None)})
+        return out
+    except Exception as e:
+        logger.warning("Recent falhou para %s.%s: %s", module_name, class_name, e)
+        return []
+
+
+# ------------------------
+# Rotas da UI do Admin
+# ------------------------
+@admin_bp.route("/", methods=["GET"])
+def admin_home():
+    """
+    Página raiz do Admin. Renderiza o template SPA.
+    """
+    try:
+        # Mantemos o caminho 'admin/index.html' para compatibilidade
+        return render_template("admin/index.html"), 200
+    except Exception:
+        # Fallback em JSON para diagnóstico, caso o template não esteja acessível
+        return (
+            jsonify(
+                {
+                    "ok": True,
+                    "ui": "admin",
+                    "message": "Template admin/index.html não encontrado. Verifique a pasta src/templates/admin/",
+                }
+            ),
+            200,
+        )
+
+
+# ------------------------
+# APIs usadas pelo dashboard do Admin
+# ------------------------
 @admin_bp.route("/api/stats", methods=["GET"])
-def admin_stats():
+def stats():
     """
-    Estatísticas compactas (alguns frontends antigos chamam este endpoint).
+    Retorna contadores básicos do sistema.
+    Tolerante à ausência de modelos/tabelas.
     """
-    try:
-        total_patients = _safe_count(["patients", "patient"])
-        total_campaigns = _safe_count(["wa_campaigns"])
-        total_runs = _safe_count(["wa_campaign_runs"])
-        return jsonify(
-            {
-                "ok": True,
-                "stats": {
-                    "patients": total_patients,
-                    "campaigns": total_campaigns,
-                    "campaign_runs": total_runs,
-                },
-            }
-        )
-    except Exception as e:
-        logger.error(f"Error getting stats: {e}")
-        return jsonify({"ok": False, "error": "stats failed"}), 500
+    data = {
+        # Pacientes: prioriza Patient em src/models/patient.py (tabela 'patients')
+        "patients": _safe_count("patient", "Patient"),
+        "reminders": _safe_count("reminder", "Reminder"),
+        "responses": _safe_count("response", "Response"),
+        "medications": _safe_count("medication", "Medication"),
+        "breathing_exercises": _safe_count("breathing_exercise", "BreathingExercise"),
+        # Campanhas são opcionais; se não existirem, retornam 0
+        "wa_campaigns": _safe_count("campaign", "WACampaign"),
+    }
+    return jsonify(data), 200
+
 
 @admin_bp.route("/api/dashboard/stats", methods=["GET"])
 def dashboard_stats():
     """
-    Versão “dashboard” das estatísticas (alguns UIs usam este caminho).
+    Alias simples para /admin/api/stats (mantém compatibilidade com o frontend).
     """
-    try:
-        total_patients = _safe_count(["patients", "patient"])
-        active_patients = 0
-        # tenta contar ativos se existir a coluna correspondente
-        table = _first_existing(["patients", "patient"])
-        if table:
-            try:
-                # tenta variantes de coluna de ativo
-                for col in ("active", "is_active"):
-                    try:
-                        sql = text(f"SELECT COUNT(*) FROM {table} WHERE {col}=1")
-                        active_patients = db.session.execute(sql).scalar() or 0
-                        break
-                    except Exception:
-                        continue
-            except Exception:
-                pass
+    return stats()
 
-        total_campaigns = _safe_count(["wa_campaigns"])
-        total_runs = _safe_count(["wa_campaign_runs"])
-
-        return jsonify(
-            {
-                "ok": True,
-                "stats": {
-                    "patients_total": total_patients,
-                    "patients_active": active_patients,
-                    "wa_campaigns": total_campaigns,
-                    "wa_campaign_runs": total_runs,
-                },
-            }
-        )
-    except Exception as e:
-        logger.error(f"Error getting dashboard stats: {e}")
-        return jsonify({"ok": False, "error": "dashboard stats failed"}), 500
 
 @admin_bp.route("/api/dashboard/recent", methods=["GET"])
 def dashboard_recent():
     """
-    Itens recentes para cards do painel.
+    Retorna itens recentes por tipo para preencher cards do dashboard.
     """
+    data = {
+        "patients": _safe_recent("patient", "Patient"),
+        "reminders": _safe_recent("reminder", "Reminder"),
+        "responses": _safe_recent("response", "Response"),
+        "medications": _safe_recent("medication", "Medication"),
+        "breathing": _safe_recent("breathing_exercise", "BreathingExercise"),
+        # Campanhas são opcionais
+        "campaigns": _safe_recent("campaign", "WACampaign"),
+    }
+    return jsonify(data), 200
+
+
+# ------------------------------------------------------
+# SPA catch-all: qualquer /admin/* (exceto /admin/api/*)
+# renderiza a mesma SPA para suportar deep links do frontend
+# ------------------------------------------------------
+@admin_bp.route("/<path:subpath>", methods=["GET"])
+def admin_spa_catch_all(subpath: str):
+    if subpath.startswith("api/"):
+        # Deixa as rotas de API responderem 404 normalmente se não existirem
+        return jsonify({"error": "Not Found"}), 404
     try:
-        return jsonify(
-            {
-                "ok": True,
-                "recent": {
-                    "patients": _safe_recent_patients(limit=5),
-                    "campaign_runs": _safe_recent_campaign_runs(limit=5),
-                },
-            }
-        )
-    except Exception as e:
-        logger.error(f"Error getting recent activity: {e}")
-        return jsonify({"ok": False, "error": "recent failed"}), 500
+        return render_template("admin/index.html"), 200
+    except Exception:
+        # Se o template não estiver acessível, redireciona para a raiz do Admin
+        return redirect("/admin")
