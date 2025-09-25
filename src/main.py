@@ -39,7 +39,6 @@ from src.models.user import db  # noqa: E402
 CORS(app)
 
 # ---------- BLUEPRINTS (rotas públicas) ----------
-# Rotas de API “core”
 from src.routes.user import user_bp  # noqa: E402
 from src.routes.patient import patient_bp  # noqa: E402
 from src.routes.reminder import reminder_bp  # noqa: E402
@@ -204,29 +203,38 @@ def health():
     )
 
 
-@app.route("/static/<path:filename>")
-def static_files(filename):
-    return send_from_directory(app.static_folder, filename)
-
-
-@app.route("/ops/boot-state")
-def boot_state():
-    # Endpoint utilizado pelos workflows/monitoramento
+def _boot_state():
+    """View real do /ops/boot-state (definida sem decorator para evitar duplicata)."""
     if _MAIN_LOADED:
-        return jsonify({"main_loaded": True, "source": "main_boot", "last_attempt": datetime.utcnow().isoformat() + "Z"})
+        return jsonify(
+            {
+                "main_loaded": True,
+                "source": "main_boot",
+                "last_attempt": datetime.utcnow().isoformat() + "Z",
+            }
+        )
     else:
         err = _BOOT_ERROR or "unknown"
         return jsonify(
             {
                 "main_loaded": False,
                 "source": "exception",
-                "error_type": getattr(err, "__class__", type("E", (), {})).__name__ if hasattr(err, "__class__") else "Exception",
+                "error_type": getattr(err, "__class__", type("E", (), {})).__name__
+                if hasattr(err, "__class__")
+                else "Exception",
                 "summary": str(err),
                 "file": "src/main.py",
                 "line": 0,
                 "last_attempt": datetime.utcnow().isoformat() + "Z",
             }
         )
+
+
+def _register_boot_state_route():
+    """Registra /ops/boot-state de forma idempotente (sem 'overwriting endpoint')."""
+    endpoint_name = "ops_boot_state"
+    if endpoint_name not in app.view_functions:
+        app.add_url_rule("/ops/boot-state", endpoint=endpoint_name, view_func=_boot_state)
 
 
 def _init_app():
@@ -242,7 +250,7 @@ def _init_app():
         # Cria/garante tabelas
         try:
             db.create_all()
-        except Exception as e:
+        except Exception:
             logger.error("⚠️ DB create_all falhou", exc_info=True)
             raise
 
@@ -264,6 +272,9 @@ def _init_app():
         _MAIN_LOADED = False
         _BOOT_ERROR = e
         logger.exception("Main app failed to initialize")
+    finally:
+        # Sempre registra o endpoint de diagnóstico de boot, mesmo em erro.
+        _register_boot_state_route()
 
 
 # ---------- Entrada ----------
@@ -281,3 +292,9 @@ else:
     db.init_app(app)
     with app.app_context():
         _init_app()
+
+
+# Arquivos estáticos (se usar)
+@app.route("/static/<path:filename>")
+def static_files(filename):
+    return send_from_directory(app.static_folder, filename)
