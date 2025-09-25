@@ -4,81 +4,67 @@ import sys
 import logging
 from sqlalchemy import text
 
-# garante que "src" é importável
+# DON'T CHANGE THIS !!!
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from flask import Flask, send_from_directory, jsonify
 from flask_cors import CORS
 
-# ---- DB base
-from src.models.user import db
-
-# ---- Importa TODOS os modelos antes do create_all (ordem importa!)
-# Tabela 'patient' (singular) usada por FKs
-try:
-    from src.models.patient import Patient
-except Exception as e:
-    print(f"[BOOT][WARN] patient model not loaded: {e}")
-
-# Modelos que referenciam patient (evita NoReferencedTableError)
-try:
-    from src.models.reminder import Reminder
-except Exception as e:
-    print(f"[BOOT][WARN] reminder model not loaded: {e}")
-
-try:
-    from src.models.response import Response
-except Exception as e:
-    print(f"[BOOT][WARN] response model not loaded: {e}")
-
-try:
-    from src.models.medication import Medication
-except Exception as e:
-    print(f"[BOOT][WARN] medication model not loaded: {e}")
-
-try:
-    from src.models.mood import Mood
-except Exception as e:
-    print(f"[BOOT][WARN] mood model not loaded: {e}")
-
-# Tabela 'patients' (plural) esperada pelo Admin
-try:
-    from src.models.patients import Patients
-except Exception as e:
-    print(f"[BOOT][WARN] patients model not loaded: {e}")
-
-# Campanhas WhatsApp (compatíveis com SQLite)
-try:
-    from src.admin.models.campaign import WACampaign, WACampaignRecipient, WACampaignRun
-except Exception as e:
-    print(f"[BOOT][WARN] campaign models not loaded: {e}")
-
+# --- Logging ---
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
+
+# --- App & DB config ---
+from src.models.user import db
 
 app = Flask(__name__, static_folder=os.path.join(os.path.dirname(__file__), "static"))
 app.config["SECRET_KEY"] = os.getenv("APP_SECRET", "change-me")
 
-# ---- Configuração DB
 database_url = os.getenv("DATABASE_URL")
 if database_url and database_url.startswith("postgres://"):
     database_url = database_url.replace("postgres://", "postgresql://", 1)
 app.config["SQLALCHEMY_DATABASE_URI"] = database_url or f"sqlite:///{os.path.join(os.path.dirname(__file__), 'app.db')}"
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
-# ---- Extensões
 CORS(app)
 db.init_app(app)
 
-# ---- Cria as tabelas (idempotente), agora que TODOS os modelos foram importados
-with app.app_context():
-    try:
-        db.create_all()
-        logger.info("✅ DB create_all executado: tabelas garantidas (patient, patients, wa_campaigns, ...)")
-    except Exception:
-        logger.exception("⚠️ DB create_all falhou")
+# ----------------------------------------------------------------
+# IMPORTAR MODELOS ***ANTES*** DO create_all()
+# (ordem pensada para resolver FKs: primeiro alvos, depois quem referencia)
+# ----------------------------------------------------------------
+# Tabelas básicas
+from src.models.breathing_exercise import BreathingExercise  # alvo de FK em Reminder
+from src.models.patient import Patient                        # alvo de FKs em várias
+# Demais modelos (tolerantes a ausência para não derrubar o boot)
+try:
+    from src.models.medication import Medication
+except Exception as e:
+    logger.warning("medication model not loaded: %s", e)
+try:
+    from src.models.response import Response
+except Exception as e:
+    logger.warning("response model not loaded: %s", e)
+try:
+    from src.models.reminder import Reminder  # referencia BreathingExercise e Patient
+except Exception as e:
+    logger.warning("reminder model not loaded: %s", e)
+try:
+    from src.models.mood import Mood
+except Exception as e:
+    logger.warning("mood model not loaded: %s", e)
 
-# ---- Blueprints (rotas)
+# Modelos de campanha (versão SQLite-safe). Se falhar, Admin continua.
+_campaigns_loaded = True
+try:
+    from src.admin.models.campaign_sqlite import WACampaign, WACampaignRecipient, WACampaignRun
+except Exception as e:
+    logger.warning("campaign models not loaded: %s", e)
+    _campaigns_loaded = False
+
+# ----------------------------------------------------------------
+# Blueprints
+# ----------------------------------------------------------------
 from src.routes.user import user_bp
 from src.routes.patient import patient_bp
 from src.routes.reminder import reminder_bp
@@ -86,21 +72,16 @@ from src.routes.response import response_bp
 from src.routes.scale import scale_bp
 from src.routes.whatsapp import whatsapp_bp
 from src.routes.telegram import telegram_bp
-from src.routes.medication import medication_bp
 from src.routes.mood import mood_bp
 from src.routes.scheduler import scheduler_bp
 from src.routes.iclinic import iclinic_bp
 from src.routes.admin_tasks import admin_tasks_bp
 from src.routes.admin_patient import admin_patient_bp
 
-# Admin UI blueprint (depois dos modelos)
-admin_bp = None
-try:
-    from src.admin.routes.admin import admin_bp
-except Exception as e:
-    print(f"[BOOT][WARN] admin_bp not loaded: {e}")
+# Admin (já tem fallback no pacote se falhar algo interno)
+from src.admin.routes import admin_bp
 
-# Registra rotas
+# Registrar blueprints
 app.register_blueprint(user_bp, url_prefix="/api/users")
 app.register_blueprint(patient_bp, url_prefix="/api/patients")
 app.register_blueprint(reminder_bp, url_prefix="/api/reminders")
@@ -114,27 +95,14 @@ app.register_blueprint(scheduler_bp, url_prefix="/api/scheduler")
 app.register_blueprint(iclinic_bp, url_prefix="/api/iclinic")
 app.register_blueprint(admin_tasks_bp, url_prefix="/admin/api")
 app.register_blueprint(admin_patient_bp, url_prefix="/admin/api")
+app.register_blueprint(admin_bp, url_prefix="/admin")
 
-if admin_bp:
-    app.register_blueprint(admin_bp, url_prefix="/admin")
-else:
-    @app.route("/admin")
-    @app.route("/admin/")
-    def admin_unavailable():
-        return jsonify({
-            "ok": False,
-            "error": "Admin UI not loaded",
-            "hint": "verifique src/admin/routes/admin.py e dependências"
-        }), 503
-
+# ----------------------------------------------------------------
+# Rotas simples
+# ----------------------------------------------------------------
 @app.route("/")
 def index():
-    return jsonify({
-        "service":"whatsapp-medical-bot",
-        "status":"running",
-        "version":"1.0.0",
-        "admin_url":"/admin"
-    })
+    return jsonify({"service": "whatsapp-medical-bot", "status": "running", "version": "1.0.0", "admin_url": "/admin"})
 
 @app.route("/health")
 def health():
@@ -148,51 +116,48 @@ def health():
         logger.exception("DB health check failed")
         db_status = f"error: {e.__class__.__name__}"
     return jsonify({
-        "service":"whatsapp-medical-bot",
-        "status":"healthy",
-        "version":"1.0.0",
-        "database":db_status,
-        "admin_enabled": bool(admin_bp)
+        "service": "whatsapp-medical-bot",
+        "status": "healthy",
+        "version": "1.0.0",
+        "database": db_status,
+        "admin_enabled": True
     })
 
 @app.route("/static/<path:filename>")
 def static_files(filename):
     return send_from_directory(app.static_folder, filename)
 
-def _safe_import_schedulers():
-    init_campaign_scheduler = None
-    init_uetg_scheduler = None
-    try:
-        from src.admin.services.scheduler_service import init_campaign_scheduler as _ics
-        init_campaign_scheduler = _ics
-    except Exception as e:
-        logger.warning(f"[BOOT][WARN] Campaign scheduler not loaded: {e}")
-    try:
-        from src.jobs.uetg_scheduler import init_scheduler as _iu
-        init_uetg_scheduler = _iu
-    except Exception as e:
-        logger.warning(f"[BOOT][WARN] u-ETG scheduler not loaded: {e}")
-    return init_campaign_scheduler, init_uetg_scheduler
-
+# ----------------------------------------------------------------
+# Boot
+# ----------------------------------------------------------------
 if __name__ == "__main__":
+    from src.admin.services.scheduler_service import init_campaign_scheduler
+    from src.jobs.uetg_scheduler import init_scheduler
+
     with app.app_context():
+        # cria todas as tabelas mapeadas (modelos já foram importados acima)
         try:
             db.create_all()
+            logger.info("✅ db.create_all() executado")
         except Exception:
-            logger.exception("Error creating tables on startup")
-        init_campaign_scheduler, init_uetg_scheduler = _safe_import_schedulers()
-        if init_uetg_scheduler:
-            try:
-                init_uetg_scheduler()
-                logger.info("✅ u-ETG Scheduler initialized")
-            except Exception:
-                logger.exception("Error initializing u-ETG scheduler")
-        if init_campaign_scheduler:
-            try:
+            logger.exception("⚠️ DB create_all falhou")
+
+        # inicializa schedulers sem derrubar o app se algo falhar
+        try:
+            init_scheduler()
+            logger.info("✅ u-ETG Scheduler inicializado")
+        except Exception:
+            logger.exception("⚠️ Erro inicializando u-ETG scheduler")
+
+        try:
+            if _campaigns_loaded:
                 init_campaign_scheduler()
-                logger.info("✅ Campaign Scheduler initialized")
-            except Exception as e:
-                logger.warning(f"Campaign scheduler disabled: {e}")
+                logger.info("✅ Campaign Scheduler inicializado")
+            else:
+                logger.warning("Campaign scheduler desabilitado (modelos não carregados)")
+        except Exception as e:
+            logger.warning(f"Campaign scheduler desabilitado: {e}")
+
     port = int(os.getenv("PORT", 8080))
     debug = os.getenv("FLASK_ENV") == "development"
     logger.info(f"Starting on port {port} (debug={debug})")
