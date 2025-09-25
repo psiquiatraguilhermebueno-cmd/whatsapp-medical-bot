@@ -1,135 +1,154 @@
 <!doctype html>
 <html lang="pt-BR">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta charset="utf-8">
   <title>Admin • WhatsApp Medical Bot</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
-    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Arial,sans-serif;margin:24px;line-height:1.4}
-    header{display:flex;align-items:center;gap:12px;margin-bottom:16px}
-    h1{font-size:20px;margin:0}
-    .ok{display:inline-block;padding:2px 8px;border-radius:12px;background:#e6ffed;color:#056b33;border:1px solid #b7ebc6;font-size:12px}
-    .grid{display:grid;grid-template-columns:1fr 1fr;gap:24px}
-    form{display:grid;gap:8px;border:1px solid #eee;border-radius:12px;padding:16px}
-    input,textarea,select{padding:10px;border:1px solid #ccc;border-radius:8px}
-    button{padding:10px 14px;border:0;border-radius:10px;background:#2563eb;color:#fff;cursor:pointer}
-    button:disabled{opacity:.6;cursor:not-allowed}
-    table{width:100%;border-collapse:collapse}
-    th,td{border-bottom:1px solid #eee;padding:8px;text-align:left}
-    .muted{color:#666}
-    .badge{display:inline-block;padding:2px 8px;border-radius:999px;background:#eef;color:#334}
-    .msg{margin-top:8px;font-size:14px}
-    .msg.ok{color:#056b33}
-    .msg.err{color:#b00020}
+    :root { --bg:#0b1020; --card:#121933; --muted:#95a0b5; --text:#e7eaf1; --ok:#22c55e; --err:#ef4444; --acc:#3b82f6;}
+    *{box-sizing:border-box} body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,sans-serif;background:var(--bg);color:var(--text)}
+    header{padding:16px 20px;border-bottom:1px solid #1d2847;background:#0f1630;position:sticky;top:0}
+    header h1{font-size:18px;margin:0;font-weight:600;letter-spacing:.3px}
+    main{max-width:1100px;margin:24px auto;padding:0 16px;display:grid;grid-template-columns:1.2fr .8fr;gap:20px}
+    .card{background:var(--card);border:1px solid #1b2544;border-radius:14px;padding:14px 16px}
+    .card h2{margin:0 0 12px 0;font-size:15px;font-weight:600;color:#cbd5e1}
+    label{display:block;font-size:12px;color:var(--muted);margin:10px 0 6px}
+    input,textarea{width:100%;padding:10px 12px;background:#0a1228;border:1px solid #1e2a4d;border-radius:10px;color:var(--text);outline:none}
+    input:focus,textarea:focus{border-color:#3155a6}
+    button{margin-top:12px;padding:10px 14px;border:1px solid #24438a;background:#173777;border-radius:10px;color:#dbe7ff;cursor:pointer}
+    button:hover{background:#1b3e88}
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .msg{margin-top:10px;font-size:12px;padding:8px 10px;border-radius:8px;border:1px solid #1f2a4a}
+    .msg.ok{border-color:#264d35;background:#0d2615;color:#a4f0be}
+    .msg.err{border-color:#4d2626;background:#261212;color:#f0a4a4}
+    ul{list-style:none;padding:0;margin:0} li{padding:8px 0;border-bottom:1px solid #1a2545}
+    .muted{color:var(--muted);font-size:12px}
+    .pill{display:inline-block;padding:2px 8px;border:1px solid #2a3a6b;border-radius:999px;margin-left:6px;font-size:11px;color:#b7c4e6}
   </style>
 </head>
 <body>
-  <header>
-    <h1>Admin</h1>
-    <span class="ok">Dashboard OK</span>
-  </header>
+  <header><h1>Admin • WhatsApp Medical Bot</h1></header>
+  <main>
+    <section class="card">
+      <h2>Novo Paciente</h2>
+      <form id="newPatientForm" onsubmit="createPatient(event)">
+        <label for="name">Nome</label>
+        <input id="name" name="name" placeholder="Ex.: Maria Silva" required>
 
-  <div class="grid">
-    <section>
-      <h2>Novo paciente</h2>
-      <form id="newPatientForm">
-        <label>Nome
-          <input name="name" required placeholder="Ex.: Maria Silva" />
-        </label>
-        <label>Telefone (E.164)
-          <input name="phone_e164" required placeholder="5511999999999" />
-        </label>
-        <label>Tags (opcional)
-          <input name="tags" placeholder="vip,teste" />
-        </label>
-        <button id="btnCreate" type="submit">Cadastrar</button>
-        <div id="createMsg" class="msg muted"></div>
+        <div class="row">
+          <div>
+            <label for="phone_e164">Telefone (WhatsApp)</label>
+            <input id="phone_e164" name="phone_e164" placeholder="+55DDDNUMERO" required>
+          </div>
+          <div>
+            <label for="tags">Tags (opcional)</label>
+            <input id="tags" name="tags" placeholder="ex.: pesquisa,u-ETG">
+          </div>
+        </div>
+
+        <button id="btnCreate" type="submit">Criar paciente</button>
+        <div id="msg" class="msg muted" style="display:none"></div>
       </form>
     </section>
 
-    <section>
-      <h2>Pacientes recentes</h2>
-      <div class="muted" id="listInfo">Carregando…</div>
-      <table id="patientsTable" style="display:none">
-        <thead>
-          <tr><th>Nome</th><th>Telefone</th><th>Tags</th><th>Criado em</th></tr>
-        </thead>
-        <tbody></tbody>
-      </table>
+    <section class="card">
+      <h2>Recentes</h2>
+      <div id="recentBox" class="muted">carregando…</div>
+      <ul id="recentList"></ul>
     </section>
-  </div>
+  </main>
 
   <script>
-    const $ = (sel) => document.querySelector(sel);
+    const $ = s => document.querySelector(s);
 
-    async function fetchJSON(url, opts) {
-      const res = await fetch(url, opts);
-      const data = await res.json().catch(() => ({}));
+    function toE164(brInput) {
+      if (!brInput) return brInput;
+      const digits = (''+brInput).replace(/\D+/g,'');
+      if (digits.startsWith('55')) return '+' + digits;
+      if (digits.startsWith('0')) return '+55' + digits.slice(1);
+      if (brInput.trim().startsWith('+')) return brInput.trim();
+      // assume Brasil se não vier com +
+      return '+55' + digits;
+    }
+
+    async function apiPostJson(url, data) {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data),
+      });
+      const text = await res.text();
+      let json = null;
+      try { json = text ? JSON.parse(text) : null; } catch {}
       if (!res.ok) {
-        const detail = data && (data.error || data.message || JSON.stringify(data));
-        throw new Error(detail || res.statusText);
+        const msg = (json && (json.error || json.message)) || ('HTTP '+res.status+' - '+text);
+        throw new Error(msg);
       }
-      return data;
+      return json ?? {};
     }
 
     async function loadPatients() {
+      const box = $('#recentBox');
+      const ul  = $('#recentList');
+      box.textContent = 'carregando…';
+      ul.innerHTML = '';
       try {
-        const data = await fetchJSON('/admin/api/patients?limit=20');
-        const tbody = $('#patientsTable tbody');
-        tbody.innerHTML = '';
-        (data.items || data.patients || data || []).forEach(p => {
-          const tr = document.createElement('tr');
-          const created = p.created_at ? new Date(p.created_at).toLocaleString() : '';
-          tr.innerHTML = \`
-            <td>\${p.name || ''}</td>
-            <td><span class="badge">\${p.phone_e164 || ''}</span></td>
-            <td>\${p.tags || ''}</td>
-            <td class="muted">\${created}</td>
-          \`;
-          tbody.appendChild(tr);
+        const data = await (await fetch('/admin/api/dashboard/recent')).json();
+        const pts = data.patients || [];
+        if (!pts.length) { box.textContent = 'sem pacientes ainda'; return; }
+        box.textContent = '';
+        pts.slice(0,10).forEach(p => {
+          const li = document.createElement('li');
+          li.innerHTML = `<strong>${p.name}</strong> <span class="pill">${p.phone_e164||''}</span>
+                          <div class="muted">${p.tags||''}</div>`;
+          ul.appendChild(li);
         });
-        $('#listInfo').style.display = 'none';
-        $('#patientsTable').style.display = '';
       } catch (e) {
-        $('#listInfo').textContent = 'Falha ao carregar pacientes: ' + e.message;
+        box.textContent = 'erro ao carregar: ' + e.message;
       }
     }
 
     async function createPatient(ev) {
       ev.preventDefault();
       const btn = $('#btnCreate');
-      const msg = $('#createMsg');
+      const msg = $('#msg');
+      msg.style.display = 'block';
       msg.className = 'msg muted';
       msg.textContent = 'Enviando…';
       btn.disabled = true;
 
       const payload = {
-        name: ev.target.name.value.trim(),
-        phone_e164: ev.target.phone_e164.value.trim(),
-        tags: ev.target.tags.value.trim() || null,
-        active: true
+        name: $('#name').value.trim(),
+        phone_e164: toE164($('#phone_e164').value),
+        tags: $('#tags').value.trim()
       };
 
       try {
-        await fetchJSON('/admin/api/patients', {
-          method: 'POST',
-          headers: {'Content-Type':'application/json'},
-          body: JSON.stringify(payload)
-        });
+        // endpoint correto do Admin
+        await apiPostJson('/admin/api/patients', payload);
         msg.className = 'msg ok';
         msg.textContent = 'Paciente criado com sucesso.';
-        ev.target.reset();
+        // limpa e recarrega
+        $('#newPatientForm').reset();
         loadPatients();
       } catch (e) {
-        msg.className = 'msg err';
-        msg.textContent = 'Erro ao criar paciente: ' + e.message;
+        // fallback: tenta API pública se existir
+        try {
+          await apiPostJson('/api/patients', payload);
+          msg.className = 'msg ok';
+          msg.textContent = 'Paciente criado (via /api/patients).';
+          $('#newPatientForm').reset();
+          loadPatients();
+        } catch (e2) {
+          msg.className = 'msg err';
+          msg.textContent = 'Erro ao criar paciente: ' + e2.message;
+        }
       } finally {
         btn.disabled = false;
       }
     }
 
     document.addEventListener('DOMContentLoaded', () => {
-      $('#newPatientForm').addEventListener('submit', createPatient);
       loadPatients();
     });
   </script>
