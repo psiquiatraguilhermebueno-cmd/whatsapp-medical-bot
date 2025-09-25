@@ -38,26 +38,7 @@ from src.models.user import db  # noqa: E402
 
 CORS(app)
 
-# ---------- BLUEPRINTS (rotas públicas) ----------
-from src.routes.user import user_bp  # noqa: E402
-from src.routes.patient import patient_bp  # noqa: E402
-from src.routes.reminder import reminder_bp  # noqa: E402
-from src.routes.response import response_bp  # noqa: E402
-from src.routes.scale import scale_bp  # noqa: E402
-from src.routes.whatsapp import whatsapp_bp  # noqa: E402
-from src.routes.telegram import telegram_bp  # noqa: E402
-from src.routes.medication import medication_bp  # noqa: E402
-from src.routes.mood import mood_bp  # noqa: E402
-from src.routes.scheduler import scheduler_bp  # noqa: E402
-from src.routes.iclinic import iclinic_bp  # noqa: E402
-
-# Admin APIs (REST utilitárias usadas pela UI)
-from src.routes.admin_tasks import admin_tasks_bp  # noqa: E402
-from src.routes.admin_patient import admin_patient_bp  # noqa: E402
-
-# Jobs / agendadores
-from src.jobs.uetg_scheduler import init_scheduler  # noqa: E402
-
+# Jobs / agendadores (importaremos init_scheduler mais abaixo, com tolerância)
 # Admin UI (carregada em _load_admin_blueprint)
 _admin_loaded = False
 _admin_load_error = None
@@ -120,13 +101,44 @@ def _load_models_safely():
             logger.warning(p)
 
 
+def _register_api_blueprints():
+    """
+    Importa e registra blueprints de API com tolerância a falhas de import.
+    Se uma rota quebrar, as demais continuam carregando.
+    """
+    def _try(bp_import, prefix):
+        try:
+            bp = bp_import()
+            app.register_blueprint(bp, url_prefix=prefix)
+            logger.info(f"API blueprint loaded: {prefix}")
+        except Exception as e:
+            logger.warning(f"API blueprint NOT loaded ({prefix}): {e}")
+
+    # Cada import é uma lambda para só executar dentro do try
+    _try(lambda: __import__("src.routes.user", fromlist=["user_bp"]).user_bp, "/api/users")
+    _try(lambda: __import__("src.routes.patient", fromlist=["patient_bp"]).patient_bp, "/api/patients")
+    _try(lambda: __import__("src.routes.reminder", fromlist=["reminder_bp"]).reminder_bp, "/api/reminders")
+    _try(lambda: __import__("src.routes.response", fromlist=["response_bp"]).response_bp, "/api/responses")
+    _try(lambda: __import__("src.routes.scale", fromlist=["scale_bp"]).scale_bp, "/api/scales")
+    _try(lambda: __import__("src.routes.whatsapp", fromlist=["whatsapp_bp"]).whatsapp_bp, "/api/whatsapp")
+    _try(lambda: __import__("src.routes.telegram", fromlist=["telegram_bp"]).telegram_bp, "/api/telegram")
+    _try(lambda: __import__("src.routes.medication", fromlist=["medication_bp"]).medication_bp, "/api/medications")
+    _try(lambda: __import__("src.routes.mood", fromlist=["mood_bp"]).mood_bp, "/api/moods")
+    _try(lambda: __import__("src.routes.scheduler", fromlist=["scheduler_bp"]).scheduler_bp, "/api/scheduler")
+    _try(lambda: __import__("src.routes.iclinic", fromlist=["iclinic_bp"]).iclinic_bp, "/api/iclinic")
+
+    # Admin APIs (REST utilitárias usadas pela UI)
+    _try(lambda: __import__("src.routes.admin_tasks", fromlist=["admin_tasks_bp"]).admin_tasks_bp, "/admin/api")
+    _try(lambda: __import__("src.routes.admin_patient", fromlist=["admin_patient_bp"]).admin_patient_bp, "/admin/api")
+
+
 def _load_admin_blueprint():
     """
     Carrega a UI de Admin. Se falhar, deixa um endpoint de diagnóstico em /admin.
     """
     global _admin_loaded, _admin_load_error
     try:
-        from src.admin.routes import admin_bp  # noqa: F401
+        admin_bp = __import__("src.admin.routes", fromlist=["admin_bp"]).admin_bp
         app.register_blueprint(admin_bp, url_prefix="/admin")
         _admin_loaded = True
         logger.info("Admin UI loaded")
@@ -149,22 +161,6 @@ def _load_admin_blueprint():
                 ),
                 503,
             )
-
-
-# ---------- Registro dos blueprints de API ----------
-app.register_blueprint(user_bp, url_prefix="/api/users")
-app.register_blueprint(patient_bp, url_prefix="/api/patients")
-app.register_blueprint(reminder_bp, url_prefix="/api/reminders")
-app.register_blueprint(response_bp, url_prefix="/api/responses")
-app.register_blueprint(scale_bp, url_prefix="/api/scales")
-app.register_blueprint(whatsapp_bp, url_prefix="/api/whatsapp")
-app.register_blueprint(telegram_bp, url_prefix="/api/telegram")
-app.register_blueprint(medication_bp, url_prefix="/api/medications")
-app.register_blueprint(mood_bp, url_prefix="/api/moods")
-app.register_blueprint(scheduler_bp, url_prefix="/api/scheduler")
-app.register_blueprint(iclinic_bp, url_prefix="/api/iclinic")
-app.register_blueprint(admin_tasks_bp, url_prefix="/admin/api")
-app.register_blueprint(admin_patient_bp, url_prefix="/admin/api")
 
 
 # ---------- Rotas básicas ----------
@@ -222,7 +218,7 @@ def _boot_state_view():
                 "main_loaded": False,
                 "source": "exception",
                 "error_type": getattr(err, "__class__", type("E", (), {})).__name__
-                if hasattr(err, "__class__")
+                if hasattr(err, "__class__)
                 else "Exception",
                 "summary": str(err),
                 "file": "src/main.py",
@@ -273,8 +269,12 @@ def _init_app():
             logger.error("⚠️ DB create_all falhou", exc_info=True)
             raise
 
+        # Registra APIs com tolerância a falhas
+        _register_api_blueprints()
+
         # Jobs (tolerante a falha)
         try:
+            init_scheduler = __import__("src.jobs.uetg_scheduler", fromlist=["init_scheduler"]).init_scheduler
             init_scheduler()
             logger.info("u-ETG Scheduler initialized")
         except Exception:
