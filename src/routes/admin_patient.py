@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify
 from datetime import datetime
 from sqlalchemy.exc import IntegrityError
+import uuid
 
 from src.models.user import db
 from src.models.patient import Patient
@@ -52,6 +53,7 @@ def create_patient():
         return jsonify({"ok": True, "created": False, "patient": existing.to_dict(), "hint": "already_exists"}), 200
 
     new_patient = Patient(
+        id=uuid.uuid4().hex,
         name=name,
         phone_e164=phone,
         tags=tags,
