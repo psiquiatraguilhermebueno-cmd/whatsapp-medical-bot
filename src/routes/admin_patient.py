@@ -1,24 +1,21 @@
 from flask import Blueprint, request, jsonify
+from sqlalchemy import or_, func
 from datetime import datetime
-from sqlalchemy.exc import IntegrityError
-import uuid
+import re
 
 from src.models.user import db
-from src.models.patient import Patient
+from src.admin.models.patient import Patient
 
 admin_patient_bp = Blueprint("admin_patient_bp", __name__)
 
-def _normalize_phone(raw: str) -> str:
-    if not raw:
+def _normalize_phone(s):
+    s = str(s or "")
+    digits = re.sub(r"\D+", "", s)
+    if not digits:
         return ""
-    digits = "".join(ch for ch in raw if ch.isdigit())
-    if digits.startswith("00"):
-        digits = digits[2:]
-    if digits.startswith("55"):
+    if s.startswith("+"):
         return "+" + digits
-    if raw.startswith("+"):
-        return raw
-    return "+55" + digits
+    return "+" + digits
 
 @admin_patient_bp.route("/patients", methods=["GET"])
 def list_patients():
@@ -26,13 +23,10 @@ def list_patients():
         limit = int(request.args.get("limit", 20))
     except Exception:
         limit = 20
-    q = (
-        Patient.query
-        .order_by(Patient.created_at.desc())
-        .limit(max(1, min(limit, 200)))
-        .all()
+    rows = (
+        Patient.query.order_by(Patient.created_at.desc()).limit(limit).all()
     )
-    return jsonify({"ok": True, "count": len(q), "items": [p.to_dict() for p in q]})
+    return jsonify({"ok": True, "count": len(rows), "items": [p.to_dict() for p in rows]})
 
 @admin_patient_bp.route("/patients", methods=["POST"])
 def create_patient():
@@ -42,56 +36,64 @@ def create_patient():
         return jsonify({"ok": False, "error": "invalid_json"}), 400
 
     name = (data.get("name") or "").strip()
-    phone = _normalize_phone(data.get("phone_e164") or "")
+    phone = _normalize_phone(data.get("phone_e164"))
     tags = (data.get("tags") or "").strip()
 
     if not name or not phone:
-        return jsonify({"ok": False, "error": "name and phone_e164 are required"}), 400
+        return jsonify({"ok": False, "error": "name_and_phone_required"}), 400
 
     existing = Patient.query.filter_by(phone_e164=phone).first()
     if existing:
         return jsonify({"ok": True, "created": False, "patient": existing.to_dict(), "hint": "already_exists"}), 200
 
-    new_patient = Patient(
-        id=uuid.uuid4().hex,
+    p = Patient(
         name=name,
         phone_e164=phone,
         tags=tags,
         active=True,
         created_at=datetime.utcnow(),
     )
-    db.session.add(new_patient)
+    db.session.add(p)
     try:
         db.session.commit()
-    except IntegrityError as e:
+    except Exception:
         db.session.rollback()
         again = Patient.query.filter_by(phone_e164=phone).first()
         if again:
             return jsonify({"ok": True, "created": False, "patient": again.to_dict(), "hint": "already_exists"}), 200
-        detail = str(getattr(e, "orig", e))
-        return jsonify({"ok": False, "error": "integrity_error", "detail": detail}), 409
+        return jsonify({"ok": False, "error": "could_not_create"}), 400
 
-    return jsonify({"ok": True, "created": True, "patient": new_patient.to_dict()}), 201
-
+    return jsonify({"ok": True, "created": True, "patient": p.to_dict()}), 201
 
 @admin_patient_bp.route("/patients/search", methods=["GET"])
 def search_patients():
-    from sqlalchemy import or_, func
     q = (request.args.get("q") or "").strip()
     try:
-        limit = int(request.args.get("limit") or 10)
+        limit = int(request.args.get("limit", 20))
     except Exception:
-        limit = 10
-    limit = max(1, min(limit, 100))
-    query = Patient.query
-    if q:
-        ql = q.lower()
-        query = query.filter(
-            or_(
-                func.lower(Patient.name).contains(ql),
-                func.lower(Patient.phone_e164).contains(ql),
-                func.lower(Patient.tags).contains(ql),
-            )
-        )
-    items = query.order_by(Patient.created_at.desc()).limit(limit).all()
-    return jsonify({"ok": True, "count": len(items), "items": [p.to_dict() for p in items]})
+        limit = 20
+
+    if not q:
+        return jsonify({"ok": True, "count": 0, "items": []})
+
+    q_lower = q.lower()
+    q_like_lower = f"%{q_lower}%"
+    q_digits = re.sub(r"\D+", "", q)
+
+    name_like = func.lower(func.coalesce(Patient.name, "")).like(q_like_lower)
+    tags_like = func.lower(func.coalesce(Patient.tags, "")).like(q_like_lower)
+
+    phone_clean = func.replace(
+        func.replace(func.replace(func.coalesce(Patient.phone_e164, ""), "+", ""), "-", ""), " ", ""
+    )
+    filters = [name_like, tags_like]
+    if q_digits:
+        filters.append(phone_clean.like(f"%{q_digits}%"))
+
+    rows = (
+        Patient.query.filter(or_(*filters))
+        .order_by(Patient.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    return jsonify({"ok": True, "count": len(rows), "items": [p.to_dict() for p in rows]})
