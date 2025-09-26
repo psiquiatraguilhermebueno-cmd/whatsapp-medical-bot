@@ -60,7 +60,6 @@ def admin_send_test_message(patient_id):
     except Exception as e:
         return jsonify({"ok": True, "delivered": False, "patient": p.to_dict(), "text": text, "detail": str(e)}), 200
 
-
 @admin_tasks_bp.route("/force-uetg-plan", methods=["GET","POST"])
 def force_uetg_plan():
     from flask import jsonify
@@ -96,4 +95,3 @@ def force_uetg_send():
             except Exception as e:
                 return jsonify({"success": False, "called": name, "error": str(e)}), 200
     return jsonify({"success": False, "error": "no_send_function", "available": [n for n in dir(m) if "send" in n or "dispatch" in n]}), 200
-
