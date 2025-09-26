@@ -141,3 +141,25 @@ def update_patient(patient_id):
         return jsonify({"ok": False, "error": "could_not_update"}), 400
 
     return jsonify({"ok": True, "updated": True, "patient": p.to_dict()}), 200
+@admin_patient_bp.route("/patients/export.csv", methods=["GET"])
+def export_patients_csv():
+    import csv, io
+    rows = Patient.query.order_by(Patient.created_at.desc()).all()
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["id","name","phone_e164","tags","active","created_at"])
+    for p in rows:
+        w.writerow([
+            p.id,
+            p.name or "",
+            p.phone_e164 or "",
+            p.tags or "",
+            1 if p.active else 0,
+            p.created_at.isoformat() if getattr(p, "created_at", None) else "",
+        ])
+    from flask import Response
+    return Response(
+        buf.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition":"attachment; filename=patients.csv"}
+    )
