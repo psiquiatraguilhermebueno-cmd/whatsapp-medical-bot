@@ -168,5 +168,30 @@ function sendTest(p){
   }).catch(e=>alert('Erro: '+e.message));
 }
 </script>
+
+<div id="uetgToolbar" style="margin:10px 0; display:flex; gap:8px; flex-wrap:wrap;">
+  <button id="btnForcePlan" class="pill">u-ETG: Sortear semana</button>
+  <button id="btnForceSend" class="pill">u-ETG: Enviar hoje</button>
+</div>
+
+<script>
+async function adminForcePlan(){
+  const r = await fetch('/admin/api/force-uetg-plan',{method:'POST',headers:{'Accept':'application/json'}});
+  const j = await r.json().catch(()=>({}));
+  alert(j.success ? 'Planejado ✅' : 'Falhou ❌');
+}
+async function adminForceSend(){
+  const r = await fetch('/admin/api/force-uetg-send',{method:'POST',headers:{'Accept':'application/json'}});
+  const j = await r.json().catch(()=>({}));
+  alert(j.success ? 'Disparo iniciado ✅' : 'Falhou ❌');
+}
+document.addEventListener('DOMContentLoaded',()=>{
+  const a=document.getElementById('btnForcePlan');
+  const b=document.getElementById('btnForceSend');
+  if(a) a.addEventListener('click', adminForcePlan);
+  if(b) b.addEventListener('click', adminForceSend);
+});
+</script>
+
 </body>
 </html>
