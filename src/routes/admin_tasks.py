@@ -95,3 +95,16 @@ def force_uetg_send():
             except Exception as e:
                 return jsonify({"success": False, "called": name, "error": str(e)}), 200
     return jsonify({"success": False, "error": "no_send_function", "available": [n for n in dir(m) if "send" in n or "dispatch" in n]}), 200
+
+
+import os
+from flask import request, jsonify
+
+def _require_admin_token():
+    token = os.environ.get("ADMIN_HTTP_TOKEN")
+    if not token:
+        return None
+    supplied = request.headers.get("X-Admin-Token") or request.args.get("token")
+    if supplied == token:
+        return None
+    return jsonify({"success": False, "error": "unauthorized"}), 401
