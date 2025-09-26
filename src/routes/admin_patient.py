@@ -97,3 +97,21 @@ def search_patients():
         .all()
     )
     return jsonify({"ok": True, "count": len(rows), "items": [p.to_dict() for p in rows]})
+
+@admin_patient_bp.route("/patients/<int:patient_id>", methods=["GET"])
+def get_patient(patient_id):
+    p = Patient.query.get(patient_id)
+    if not p:
+        return jsonify({"ok": False, "error": "not_found"}), 404
+    return jsonify({"ok": True, "patient": p.to_dict()}), 200
+
+
+@admin_patient_bp.route("/patients/<int:patient_id>", methods=["DELETE"])
+def delete_patient(patient_id):
+    p = Patient.query.get(patient_id)
+    if not p:
+        return jsonify({"ok": False, "error": "not_found"}), 404
+    db.session.delete(p)
+    db.session.commit()
+    return jsonify({"ok": True, "deleted": True, "id": patient_id}), 200
+
