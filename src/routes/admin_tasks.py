@@ -86,62 +86,24 @@ from importlib import import_module
 from src.models.patient import Patient
 
 
+
 @admin_tasks_bp.route("/patients/<int:patient_id>/send-test", methods=["POST"])
 def admin_send_test_message(patient_id):
     from flask import request, jsonify
-    from importlib import import_module
-    delivered = False
-    try:
-        data = request.get_json(force=True) or {}
-    except Exception:
-        data = {}
-    text = (data.get("text") or "Teste Admin OK").strip()
+    from src.models.patient import Patient
     p = Patient.query.get(patient_id)
     if not p:
         return jsonify({"ok": False, "error": "not_found"}), 404
-    modules = [
-        "src.admin.services.whatsapp_service",
-        "src.services.whatsapp_admin_service",
-        "src.services.whatsapp_service",
-        "src.services.telegram_service",
-    ]
-    fn_names = ["send_text","send_message","send_whatsapp_message","send_text_message","send_whatsapp_text"]
-    cls_names = ["WhatsappAdminService","WhatsAppAdminService","WhatsappService","WhatsAppService","WhatsAppClient","WhatsAppProvider"]
-    tried = []
-    for mod in modules:
-        try:
-            m = import_module(mod)
-            rec = {"module": mod, "import": "ok", "called": None, "error": None, "available": [n for n in dir(m) if any(x in n.lower() for x in ("whats","send"))][:80]}
-            for fn_name in fn_names:
-                fn = getattr(m, fn_name, None)
-                if callable(fn):
-                    try:
-                        fn(p.phone_e164, text)
-                        delivered = True
-                        rec["called"] = f"func:{fn_name}"
-                        tried.append(rec)
-                        return jsonify({"ok": True, "delivered": True, "patient": p.to_dict(), "text": text, "tried": tried}), 200
-                    except Exception as e:
-                        rec["error"] = str(e)
-            for cls_name in cls_names:
-                cls = getattr(m, cls_name, None)
-                if cls:
-                    try:
-                        svc = cls()
-                        for meth in fn_names:
-                            if hasattr(svc, meth):
-                                try:
-                                    getattr(svc, meth)(p.phone_e164, text)
-                                    delivered = True
-                                    rec["called"] = f"class:{cls_name}.{meth}"
-                                    tried.append(rec)
-                                    return jsonify({"ok": True, "delivered": True, "patient": p.to_dict(), "text": text, "tried": tried}), 200
-                                except Exception as e:
-                                    rec["error"] = str(e)
-                    except Exception as e:
-                        rec["error"] = str(e)
-            tried.append(rec)
-        except Exception as e:
-            tried.append({"module": mod, "import": "error", "error": str(e)})
-    return jsonify({"ok": True, "delivered": False, "patient": p.to_dict(), "text": text, "tried": tried}), 200
-
+    text = (request.get_json(silent=True) or {}).get("text") or "Mensagem de teste ✅"
+    try:
+        from src.services.whatsapp_admin_service import WhatsAppService
+        svc = WhatsAppService()
+        if hasattr(svc, "send_text_message"):
+            svc.send_text_message(p.phone_e164, text)
+        elif hasattr(svc, "send_message"):
+            svc.send_message(p.phone_e164, text)
+        else:
+            return jsonify({"ok": False, "error": "no_send_method"}), 500
+        return jsonify({"ok": True, "delivered": True, "patient": p.to_dict(), "text": text}), 200
+    except Exception as e:
+        return jsonify({"ok": True, "delivered": False, "patient": p.to_dict(), "text": text, "detail": str(e)}), 200
