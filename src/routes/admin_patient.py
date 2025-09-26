@@ -163,3 +163,55 @@ def export_patients_csv():
         mimetype="text/csv",
         headers={"Content-Disposition":"attachment; filename=patients.csv"}
     )
+
+
+@admin_patient_bp.route("/patients/import.csv", methods=["POST"])
+def import_patients_csv():
+    import csv, io, re
+    raw = ""
+    if "file" in request.files:
+        raw = request.files["file"].read().decode("utf-8", errors="ignore")
+    else:
+        raw = request.get_data(as_text=True) or ""
+    if not raw.strip():
+        return jsonify({"ok": False, "error": "empty_csv"}), 400
+
+    def _norm_phone(v: str) -> str:
+        v = (v or "").strip()
+        if not v:
+            return ""
+        digits = re.sub(r"\D+", "", v)
+        if not digits:
+            return ""
+        if v.startswith("+"):
+            return "+" + digits
+        return "+" + digits
+
+    reader = csv.DictReader(io.StringIO(raw))
+    created = 0
+    updated = 0
+    seen = []
+    for row in reader:
+        name = (row.get("name") or "").strip()
+        phone = _norm_phone(row.get("phone_e164") or row.get("phone") or "")
+        tags = (row.get("tags") or "").strip()
+        if not name or not phone:
+            continue
+        p = Patient.query.filter_by(phone_e164=phone).first()
+        if p:
+            changed = False
+            if p.name != name:
+                p.name = name; changed = True
+            if tags and p.tags != tags:
+                p.tags = tags; changed = True
+            if not p.active:
+                p.active = True; changed = True
+            if changed:
+                updated += 1
+        else:
+            p = Patient(name=name, phone_e164=phone, tags=tags, active=True, created_at=datetime.utcnow())
+            db.session.add(p)
+            created += 1
+        seen.append({"name": name, "phone_e164": phone, "tags": tags})
+    db.session.commit()
+    return jsonify({"ok": True, "created": created, "updated": updated, "rows": len(seen), "preview": seen[:10]}), 200
