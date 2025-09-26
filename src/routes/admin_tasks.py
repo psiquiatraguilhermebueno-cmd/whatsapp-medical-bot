@@ -85,50 +85,63 @@ from flask import request, jsonify
 from importlib import import_module
 from src.models.patient import Patient
 
+
 @admin_tasks_bp.route("/patients/<int:patient_id>/send-test", methods=["POST"])
 def admin_send_test_message(patient_id):
+    from flask import request, jsonify
+    from importlib import import_module
+    delivered = False
+    try:
+        data = request.get_json(force=True) or {}
+    except Exception:
+        data = {}
+    text = (data.get("text") or "Teste Admin OK").strip()
     p = Patient.query.get(patient_id)
     if not p:
         return jsonify({"ok": False, "error": "not_found"}), 404
-    data = request.get_json(silent=True) or {}
-    text = (data.get("text") or f"Olá {p.name}, esta é uma mensagem de teste.").strip()
-
-    delivered = False
-    detail = None
-
-    # Tenta enviar usando serviços existentes, mas sem quebrar se não houver
-    for mod_name in ("src.services.whatsapp_admin_service", "src.services.whatsapp_service"):
+    modules = [
+        "src.admin.services.whatsapp_service",
+        "src.services.whatsapp_admin_service",
+        "src.services.whatsapp_service",
+        "src.services.telegram_service",
+    ]
+    fn_names = ["send_text","send_message","send_whatsapp_message","send_text_message","send_whatsapp_text"]
+    cls_names = ["WhatsappAdminService","WhatsAppAdminService","WhatsappService","WhatsAppService","WhatsAppClient","WhatsAppProvider"]
+    tried = []
+    for mod in modules:
         try:
-            m = import_module(mod_name)
-            for fn_name in ("send_text", "send_message", "send_whatsapp_message"):
+            m = import_module(mod)
+            rec = {"module": mod, "import": "ok", "called": None, "error": None, "available": [n for n in dir(m) if any(x in n.lower() for x in ("whats","send"))][:80]}
+            for fn_name in fn_names:
                 fn = getattr(m, fn_name, None)
                 if callable(fn):
-                    fn(p.phone_e164, text)
-                    delivered = True
-                    break
-            if delivered:
-                break
-            # tenta classe de serviço comum
-            for cls_name in ("WhatsappAdminService", "WhatsAppAdminService", "WhatsappService", "WhatsAppService"):
+                    try:
+                        fn(p.phone_e164, text)
+                        delivered = True
+                        rec["called"] = f"func:{fn_name}"
+                        tried.append(rec)
+                        return jsonify({"ok": True, "delivered": True, "patient": p.to_dict(), "text": text, "tried": tried}), 200
+                    except Exception as e:
+                        rec["error"] = str(e)
+            for cls_name in cls_names:
                 cls = getattr(m, cls_name, None)
                 if cls:
                     try:
                         svc = cls()
-                        if hasattr(svc, "send_message"):
-                            svc.send_message(p.phone_e164, text)
-                            delivered = True
-                            break
+                        for meth in fn_names:
+                            if hasattr(svc, meth):
+                                try:
+                                    getattr(svc, meth)(p.phone_e164, text)
+                                    delivered = True
+                                    rec["called"] = f"class:{cls_name}.{meth}"
+                                    tried.append(rec)
+                                    return jsonify({"ok": True, "delivered": True, "patient": p.to_dict(), "text": text, "tried": tried}), 200
+                                except Exception as e:
+                                    rec["error"] = str(e)
                     except Exception as e:
-                        detail = str(e)
-            if delivered:
-                break
+                        rec["error"] = str(e)
+            tried.append(rec)
         except Exception as e:
-            detail = str(e)
+            tried.append({"module": mod, "import": "error", "error": str(e)})
+    return jsonify({"ok": True, "delivered": False, "patient": p.to_dict(), "text": text, "tried": tried}), 200
 
-    return jsonify({
-        "ok": True,
-        "delivered": delivered,
-        "patient": p.to_dict(),
-        "text": text,
-        "detail": detail
-    }), 200
