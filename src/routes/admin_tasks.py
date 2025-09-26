@@ -22,55 +22,7 @@ def test():
         'status': 'success'
     })
 
-@admin_tasks_bp.route('/force-uetg-plan', methods=['POST'])
-def force_uetg_plan():
-    """Forçar planejamento u-ETG"""
-    try:
-        from src.jobs.uetg_scheduler import force_plan
-        result = force_plan()
-        
-        if result:
-            return jsonify({
-                'success': True,
-                'message': 'Planejamento u-ETG executado com sucesso'
-            })
-        else:
-            return jsonify({
-                'success': False,
-                'message': 'Falha no planejamento u-ETG'
-            }), 500
-            
-    except Exception as e:
-        logger.error(f"Error in force u-ETG plan: {e}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
 
-@admin_tasks_bp.route('/force-uetg-send', methods=['POST'])
-def force_uetg_send():
-    """Forçar envio u-ETG"""
-    try:
-        from src.jobs.uetg_scheduler import force_send
-        result = force_send()
-        
-        if result:
-            return jsonify({
-                'success': True,
-                'message': 'Envio u-ETG executado com sucesso'
-            })
-        else:
-            return jsonify({
-                'success': False,
-                'message': 'Falha no envio u-ETG'
-            }), 500
-            
-    except Exception as e:
-        logger.error(f"Error in force u-ETG send: {e}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
 
 @admin_tasks_bp.route("/_routes", methods=["GET"])
 def _list_routes():
@@ -117,7 +69,7 @@ def force_uetg_plan():
         m = importlib.import_module("src.jobs.uetg_scheduler")
     except Exception as e:
         return jsonify({"success": False, "error": f"import_module: {e}"}), 200
-    for name in ("plan_next_week","force_plan","plan","schedule_week"):
+    for name in ("plan_next_week","plan","schedule_week","force_plan"):
         fn = getattr(m, name, None)
         if callable(fn):
             try:
@@ -135,7 +87,7 @@ def force_uetg_send():
         m = importlib.import_module("src.jobs.uetg_scheduler")
     except Exception as e:
         return jsonify({"success": False, "error": f"import_module: {e}"}), 200
-    for name in ("send_today","force_send","send","dispatch"):
+    for name in ("send_today","send","dispatch","force_send"):
         fn = getattr(m, name, None)
         if callable(fn):
             try:
