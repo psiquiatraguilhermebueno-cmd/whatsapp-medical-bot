@@ -110,7 +110,8 @@ def admin_send_test_message(patient_id):
 
 
 
-@admin_tasks_bp.route("/admin/api/force-uetg-plan", methods=["POST"])
+
+@admin_tasks_bp.route("/admin/api/force-uetg-plan", methods=["POST","GET"])
 def force_uetg_plan():
     from flask import jsonify
     import importlib
@@ -118,17 +119,18 @@ def force_uetg_plan():
         m = importlib.import_module("src.jobs.uetg_scheduler")
     except Exception as e:
         return jsonify({"success": False, "error": f"import_module: {e}"}), 200
-    fn = getattr(m, "plan_next_week", None) or getattr(m, "force_plan", None) or getattr(m, "plan", None)
-    if not callable(fn):
-        return jsonify({"success": False, "error": "no_plan_function", "candidates": [n for n in dir(m) if "plan" in n]}), 200
-    try:
-        rv = fn()
-        return jsonify({"success": True, "result": str(rv) if rv is not None else None}), 200
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 200
+    for name in ("plan_next_week","force_plan","plan","schedule_week"):
+        fn = getattr(m, name, None)
+        if callable(fn):
+            try:
+                rv = fn()
+                return jsonify({"success": True, "called": name, "result": (str(rv) if rv is not None else None)}), 200
+            except Exception as e:
+                return jsonify({"success": False, "called": name, "error": str(e)}), 200
+    return jsonify({"success": False, "error": "no_plan_function", "available": [n for n in dir(m) if "plan" in n or "schedule" in n]}), 200
 
 
-@admin_tasks_bp.route("/admin/api/force-uetg-send", methods=["POST"])
+@admin_tasks_bp.route("/admin/api/force-uetg-send", methods=["POST","GET"])
 def force_uetg_send():
     from flask import jsonify
     import importlib
@@ -136,15 +138,15 @@ def force_uetg_send():
         m = importlib.import_module("src.jobs.uetg_scheduler")
     except Exception as e:
         return jsonify({"success": False, "error": f"import_module: {e}"}), 200
-    fn = getattr(m, "send_today", None) or getattr(m, "force_send", None) or getattr(m, "send", None)
-    if not callable(fn):
-        return jsonify({"success": False, "error": "no_send_function", "candidates": [n for n in dir(m) if "send" in n or "dispatch" in n]}), 200
-    try:
-        rv = fn()
-        return jsonify({"success": True, "result": str(rv) if rv is not None else None}), 200
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 200
-
+    for name in ("send_today","force_send","send","dispatch"):
+        fn = getattr(m, name, None)
+        if callable(fn):
+            try:
+                rv = fn()
+                return jsonify({"success": True, "called": name, "result": (str(rv) if rv is not None else None)}), 200
+            except Exception as e:
+                return jsonify({"success": False, "called": name, "error": str(e)}), 200
+    return jsonify({"success": False, "error": "no_send_function", "available": [n for n in dir(m) if "send" in n or "dispatch" in n]}), 200
 
 @admin_tasks_bp.route("/admin/api/uetg/plan-now", methods=["POST"])
 def uetg_plan_now():
