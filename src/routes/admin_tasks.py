@@ -107,3 +107,37 @@ def admin_send_test_message(patient_id):
         return jsonify({"ok": True, "delivered": True, "patient": p.to_dict(), "text": text}), 200
     except Exception as e:
         return jsonify({"ok": True, "delivered": False, "patient": p.to_dict(), "text": text, "detail": str(e)}), 200
+
+
+@admin_tasks_bp.route("/admin/api/force-uetg-plan", methods=["POST"])
+def force_uetg_plan():
+    from flask import jsonify
+    try:
+        from src.jobs.uetg_scheduler import plan_next_week as _plan
+    except Exception:
+        try:
+            from src.jobs.uetg_scheduler import force_plan as _plan
+        except Exception as e:
+            return jsonify({"success": False, "error": str(e)}), 200
+    try:
+        _plan()
+        return jsonify({"success": True}), 200
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 200
+
+
+@admin_tasks_bp.route("/admin/api/force-uetg-send", methods=["POST"])
+def force_uetg_send():
+    from flask import jsonify
+    try:
+        from src.jobs.uetg_scheduler import send_today as _send
+    except Exception:
+        try:
+            from src.jobs.uetg_scheduler import force_send as _send
+        except Exception as e:
+            return jsonify({"success": False, "error": str(e)}), 200
+    try:
+        _send()
+        return jsonify({"success": True}), 200
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 200
