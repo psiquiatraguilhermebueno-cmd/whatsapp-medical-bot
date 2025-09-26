@@ -176,12 +176,12 @@ function sendTest(p){
 
 <script>
 async function adminForcePlan(){
-  const r = await fetch('/admin/api/force-uetg-plan',{method:'POST',headers:{'Accept':'application/json'}});
+  const r = await fetch('/admin/api/uetg/plan-now',{method:'POST',headers:{'Accept':'application/json'}});
   const j = await r.json().catch(()=>({}));
   alert(j.success ? 'Planejado ✅' : 'Falhou ❌');
 }
 async function adminForceSend(){
-  const r = await fetch('/admin/api/force-uetg-send',{method:'POST',headers:{'Accept':'application/json'}});
+  const r = await fetch('/admin/api/uetg/send-now',{method:'POST',headers:{'Accept':'application/json'}});
   const j = await r.json().catch(()=>({}));
   alert(j.success ? 'Disparo iniciado ✅' : 'Falhou ❌');
 }
