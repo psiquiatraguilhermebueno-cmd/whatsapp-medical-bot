@@ -109,9 +109,7 @@ def admin_send_test_message(patient_id):
         return jsonify({"ok": True, "delivered": False, "patient": p.to_dict(), "text": text, "detail": str(e)}), 200
 
 
-
-
-@admin_tasks_bp.route("/admin/api/force-uetg-plan", methods=["POST","GET"])
+@admin_tasks_bp.route("/force-uetg-plan", methods=["GET","POST"])
 def force_uetg_plan():
     from flask import jsonify
     import importlib
@@ -129,8 +127,7 @@ def force_uetg_plan():
                 return jsonify({"success": False, "called": name, "error": str(e)}), 200
     return jsonify({"success": False, "error": "no_plan_function", "available": [n for n in dir(m) if "plan" in n or "schedule" in n]}), 200
 
-
-@admin_tasks_bp.route("/admin/api/force-uetg-send", methods=["POST","GET"])
+@admin_tasks_bp.route("/force-uetg-send", methods=["GET","POST"])
 def force_uetg_send():
     from flask import jsonify
     import importlib
@@ -147,44 +144,3 @@ def force_uetg_send():
             except Exception as e:
                 return jsonify({"success": False, "called": name, "error": str(e)}), 200
     return jsonify({"success": False, "error": "no_send_function", "available": [n for n in dir(m) if "send" in n or "dispatch" in n]}), 200
-
-@admin_tasks_bp.route("/admin/api/uetg/plan-now", methods=["POST"])
-def uetg_plan_now():
-    from flask import jsonify
-    import importlib
-    try:
-        m = importlib.import_module("src.jobs.uetg_scheduler")
-    except Exception as e:
-        return jsonify({"success": False, "error": f"import:{e}"}), 200
-    tried = ["plan_next_week", "force_plan", "plan"]
-    last_err = None
-    for name in tried:
-        fn = getattr(m, name, None)
-        if callable(fn):
-            try:
-                rv = fn()
-                return jsonify({"success": True, "called": name, "result": (str(rv) if rv is not None else None)}), 200
-            except Exception as e:
-                last_err = str(e)
-    return jsonify({"success": False, "error": "no_callable", "tried": tried, "detail": last_err}), 200
-
-
-@admin_tasks_bp.route("/admin/api/uetg/send-now", methods=["POST"])
-def uetg_send_now():
-    from flask import jsonify
-    import importlib
-    try:
-        m = importlib.import_module("src.jobs.uetg_scheduler")
-    except Exception as e:
-        return jsonify({"success": False, "error": f"import:{e}"}), 200
-    tried = ["send_today", "force_send", "send", "dispatch_today", "dispatch"]
-    last_err = None
-    for name in tried:
-        fn = getattr(m, name, None)
-        if callable(fn):
-            try:
-                rv = fn()
-                return jsonify({"success": True, "called": name, "result": (str(rv) if rv is not None else None)}), 200
-            except Exception as e:
-                last_err = str(e)
-    return jsonify({"success": False, "error": "no_callable", "tried": tried, "detail": last_err}), 200
