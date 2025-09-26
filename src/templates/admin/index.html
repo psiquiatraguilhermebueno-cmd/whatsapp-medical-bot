@@ -155,6 +155,18 @@
       $('#searchForm').addEventListener('submit', searchPatients);
       loadRecent();
     });
-  </script>
+  
+function sendTest(p){
+  const msg = prompt('Mensagem de teste:', 'Teste via Admin API ✅');
+  if(!msg) return;
+  fetch('/admin/api/patients/'+p.id+'/send-test', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json','Accept':'application/json'},
+    body: JSON.stringify({text: msg})
+  }).then(r=>r.json()).then(res=>{
+    alert(res.delivered ? 'Enviado ✅' : ('Falhou ❌' + (res.detail ? ('\n'+res.detail) : '')));
+  }).catch(e=>alert('Erro: '+e.message));
+}
+</script>
 </body>
 </html>
