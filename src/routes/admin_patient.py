@@ -102,3 +102,42 @@ def search_patients():
         .all()
     )
     return jsonify({"ok": True, "count": len(rows), "items": [p.to_dict() for p in rows]})
+@admin_patient_bp.route("/patients/<int:patient_id>", methods=["PUT","PATCH"])
+def update_patient(patient_id):
+    try:
+        data = request.get_json(force=True) or {}
+    except Exception:
+        return jsonify({"ok": False, "error": "invalid_json"}), 400
+
+    p = Patient.query.get(patient_id)
+    if not p:
+        return jsonify({"ok": False, "error": "not_found"}), 404
+
+    name = data.get("name")
+    phone = data.get("phone_e164")
+    tags = data.get("tags")
+    active = data.get("active")
+
+    if name is not None:
+        p.name = (name or "").strip()
+
+    if phone is not None:
+        phone = _normalize_phone(phone)
+        other = Patient.query.filter(Patient.phone_e164 == phone, Patient.id != p.id).first()
+        if other:
+            return jsonify({"ok": False, "error": "phone_in_use"}), 409
+        p.phone_e164 = phone
+
+    if tags is not None:
+        p.tags = (tags or "").strip()
+
+    if active is not None:
+        p.active = bool(active)
+
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({"ok": False, "error": "could_not_update"}), 400
+
+    return jsonify({"ok": True, "updated": True, "patient": p.to_dict()}), 200
